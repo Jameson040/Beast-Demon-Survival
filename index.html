@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Beast Demon Survival</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<style>
+html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:Georgia,"Times New Roman",serif;color:#eee;user-select:none;-webkit-user-select:none;touch-action:none}
+canvas{display:block;width:100vw;height:100vh}
+#ov{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:radial-gradient(ellipse at center,rgba(0,0,0,.35),rgba(0,0,0,.8))}
+#ov.hide{display:none}
+.panel{max-width:640px;margin:16px;padding:26px 34px;background:rgba(22,17,12,.92);border:1px solid #7a5230;border-radius:6px;text-align:center;box-shadow:0 0 40px rgba(0,0,0,.8)}
+h1{margin:0 0 4px;color:#d9c08a;letter-spacing:3px;font-size:34px}
+h2{margin:0 0 10px;color:#c94;font-size:26px;letter-spacing:2px}
+.sub{color:#a99;font-style:italic;margin-bottom:14px}
+p{line-height:1.45;color:#ccc;margin:8px 0}
+table{margin:10px auto;border-collapse:collapse;font-size:14px}
+td{padding:3px 10px;text-align:left;color:#ccc}
+td:first-child{color:#d9c08a;text-align:right;font-family:monospace}
+.btns{margin-top:16px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+button{font-family:inherit;font-size:16px;padding:9px 18px;background:#2f6b3a;color:#fff;border:1px solid #6fae7a;border-radius:4px;cursor:pointer}
+button:hover{background:#3d8a4b}
+button.sel{outline:2px solid #d9c08a}
+button.alt{background:#5a3b22;border-color:#a7774f}
+.stats{font-family:monospace;font-size:15px;color:#ddd;margin:10px 0}
+.hint{font-size:12px;color:#887;margin-top:12px}
+
+</style>
+</head>
+<body>
+<canvas id="hud"></canvas>
+<div id="ov"></div>
+<div id="err"></div>
+<script>window.onerror=function(m,s,l,c,e){document.getElementById('err').textContent+=m+' @'+(s||'').split('/').pop()+':'+l+'\n';};</script>
+<script src="vendor/pixi.min.js"></script>
+<script src="js/game.js"></script>
+<script src="js/art.js"></script>
+<script src="js/render.js"></script>
+</body>
+</html>
