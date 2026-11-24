@@ -1,0 +1,16 @@
+{
+  "clip": "AnimalArmature|Gallop",
+  "duration": 0.5833333134651184,
+  "frames": 8,
+  "views": 9,
+  "center": 4,
+  "step": 0.25,
+  "cell": {
+    "w": 360,
+    "h": 400
+  },
+  "uppm": 132,
+  "groundRow": 369,
+  "pitchDeg": 9,
+  "yawConvention": "game yaw, positive = screen right (toward +x)"
+}
