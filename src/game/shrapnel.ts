@@ -1,5 +1,5 @@
 import type { GameEngine } from './engine';
-import { sRockRicochet, sThud, sWhoosh } from './audio';
+import { sRockClip, sRockRicochet, sThud, sWhoosh } from './audio';
 import { clamp, GRAV, lerp, rand, RockObstacle, Scar, StoneEntity } from './types';
 
 /** Air drag for shrapnel, per second. Dense chunks keep their speed, small fragments shed it. */
@@ -287,17 +287,23 @@ export function updateShrapnel(eng: GameEngine, dt: number): void {
         const ly = ry0 + (ry1 - ry0) * k;
         const dd = Math.abs(lx);
         if (ly > -0.3 && ly < 3.6) {
-          if (dd < 1.5) {
+          if (dd < 1.8) {
             s.near = true;
             eng.G.close++;
-            eng.G.score += 25;
+            eng.G.score += dd < 0.8 ? 50 : 25;
+            // Sonic shockwave whip crack pan
+            sRockClip(clamp(lx / 2, -1, 1));
+            // Adrenaline camera trauma and vacuum push
+            eng.G.shake = Math.max(eng.G.shake, dd < 0.8 ? 0.42 : 0.22);
+            eng.cam.x += (lx > 0 ? -1 : 1) * (1.8 - dd) * 0.35;
+            eng.G.rockFlash = Math.max(eng.G.rockFlash || 0, dd < 0.8 ? 0.75 : 0.4);
             eng.G.pops.push({
-              text: dd < 0.8 ? 'CLOSE!!' : 'close',
-              t: 0,
+              text: dd < 0.8 ? 'CLOSE CALL!!' : 'NEAR MISS!',
+              t: -0.2,
               x: eng.view.W / 2 + lx * 140 * eng.view.U,
-              y: eng.view.H * 0.55,
+              y: eng.view.H * 0.48,
+              col: dd < 0.8 ? 'rgba(255,225,90,' : 'rgba(235,245,255,',
             });
-            eng.G.shake = Math.max(eng.G.shake, 0.06);
           }
           if (dd < 4) sWhoosh(clamp(lx / 3, -1, 1), s.bullet);
         }

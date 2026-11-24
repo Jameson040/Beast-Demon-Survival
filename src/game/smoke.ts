@@ -46,10 +46,10 @@ export function puffAlpha(age: number): number {
   return fadeIn * fadeOut * fadeOut;
 }
 
-/** Colour: saturated green when fresh, greying as the smoke ages. */
+/** Colour: vivid Attack on Titan Scouting Legion emerald green when fresh, fading into mint chalk. */
 export function puffColor(age: number): [number, number, number] {
   const t = clamp(age / PUFF_LIFE, 0, 1);
-  return [lerp(58, 150, t), lerp(186, 170, t), lerp(96, 150, t)];
+  return [lerp(28, 120, t), lerp(218, 228, t), lerp(85, 150, t)];
 }
 
 /** Lay puffs along a canister's flight, one per EMIT_SPACING metres travelled. */

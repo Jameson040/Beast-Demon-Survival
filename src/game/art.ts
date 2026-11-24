@@ -325,12 +325,13 @@ function artSky(): void {
   let c = cnv(4, 512);
   let g = c.getContext('2d')!;
   const lg = g.createLinearGradient(0, 0, 0, 512);
-  lg.addColorStop(0, '#344a70');
-  lg.addColorStop(0.28, '#627692');
-  lg.addColorStop(0.56, '#b89a84');
-  lg.addColorStop(0.78, '#dfb78a');
-  lg.addColorStop(0.92, '#efc898');
-  lg.addColorStop(1, '#f3d4a4');
+  // Authentic Attack on Titan high-noon Shiganshina azure summer sky
+  lg.addColorStop(0, '#1852af');
+  lg.addColorStop(0.25, '#2772d2');
+  lg.addColorStop(0.50, '#5da0ed');
+  lg.addColorStop(0.72, '#9ecaff');
+  lg.addColorStop(0.88, '#d7ecff');
+  lg.addColorStop(1, '#f6fbfe');
   g.fillStyle = lg;
   g.fillRect(0, 0, 4, 512);
   reg('sky', c, 1, 0, 0);
@@ -349,32 +350,32 @@ function artSky(): void {
         28 + r() * 58 * Math.sin(t * Math.PI + 0.25),
       ]);
     }
-    // Warm violet-mauve cloud base shadows
+    // Atmospheric cool-blue cloud base shadows
     for (const [x, y, rr] of blobs) {
       g.fillStyle = radial(g, x - rr * 0.1, y + rr * 0.34, rr * 1.25, [
-        [0, 'rgba(155,126,132,0.58)'],
-        [0.65, 'rgba(165,134,132,0.22)'],
-        [1, 'rgba(165,134,132,0)'],
+        [0, 'rgba(135,160,195,0.48)'],
+        [0.65, 'rgba(155,180,210,0.18)'],
+        [1, 'rgba(165,190,220,0)'],
       ]);
       g.fillRect(0, 0, 680, 250);
     }
-    // Sunlit golden-cream cloud crowns (lit from upper-right)
+    // Sunlit brilliant-white cloud crowns (lit from upper-right)
     for (const [x, y, rr] of blobs) {
       g.fillStyle = radial(g, x + rr * 0.18, y - rr * 0.32, rr, [
-        [0, 'rgba(255,248,234,0.96)'],
-        [0.55, 'rgba(252,226,196,0.62)'],
-        [1, 'rgba(242,204,178,0)'],
+        [0, 'rgba(255,255,255,0.98)'],
+        [0.55, 'rgba(240,248,255,0.72)'],
+        [1, 'rgba(225,240,255,0)'],
       ]);
       g.fillRect(0, 0, 680, 250);
     }
     reg('cloud' + v, c, 1, 0.5, 0.6);
   }
 
-  // 3 Mountain ridges with golden-hour sunlit slopes & distant pine treelines
+  // 3 Mountain ridges with anime atmospheric aerial perspective
   const layers = [
-    { top: [136, 146, 166], bot: [198, 182, 166], amp: 155, k: [2, 5, 11, 23], base: 0.62, seed: 3 },
-    { top: [108, 116, 124], bot: [176, 162, 142], amp: 112, k: [3, 7, 13, 29], base: 0.53, seed: 7 },
-    { top: [74, 86, 62], bot: [138, 134, 98], amp: 64, k: [4, 9, 17, 41], base: 0.38, seed: 13 },
+    { top: [95, 132, 178], bot: [175, 204, 235], amp: 155, k: [2, 5, 11, 23], base: 0.62, seed: 3 },
+    { top: [70, 104, 142], bot: [142, 178, 208], amp: 112, k: [3, 7, 13, 29], base: 0.53, seed: 7 },
+    { top: [50, 88, 62], bot: [114, 154, 118], amp: 64, k: [4, 9, 17, 41], base: 0.38, seed: 13 },
   ];
   layers.forEach((L, li) => {
     c = cnv(2048, 360);

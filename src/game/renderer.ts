@@ -56,12 +56,12 @@ void main() {
   float big = fbm(w * 0.008);
   float mid = fbm(w * 0.028 + 3.0);
   float clump = fbm(w * 0.11 + 11.0);
-  vec3 deep = vec3(0.22, 0.34, 0.13), meadow = vec3(0.40, 0.52, 0.20), sunlit = vec3(0.58, 0.62, 0.26);
-  vec3 dry = vec3(0.66, 0.58, 0.30), dirt = vec3(0.46, 0.36, 0.22);
+  vec3 deep = vec3(0.24, 0.40, 0.15), meadow = vec3(0.46, 0.62, 0.22), sunlit = vec3(0.66, 0.72, 0.28);
+  vec3 dry = vec3(0.74, 0.66, 0.34), dirt = vec3(0.52, 0.38, 0.22);
   vec3 c = mix(deep, meadow, mid);
-  c = mix(c, sunlit, smoothstep(0.42, 0.72, clump) * 0.55);
-  c = mix(c, dry, smoothstep(0.55, 0.78, big) * 0.7);
-  c = mix(c, dirt, smoothstep(0.62, 0.8, fbm(w * 0.02 + 9.0)) * 0.55);
+  c = mix(c, sunlit, smoothstep(0.42, 0.72, clump) * 0.58);
+  c = mix(c, dry, smoothstep(0.55, 0.78, big) * 0.68);
+  c = mix(c, dirt, smoothstep(0.62, 0.8, fbm(w * 0.02 + 9.0)) * 0.52);
   // Worn cavalry track out of the gate, plus a pair of wheel ruts
   float road = exp(-pow(w.x / 11.0, 2.0));
   float rut = exp(-pow((abs(w.x) - 3.2) / 0.55, 2.0)) * 0.35;
@@ -121,7 +121,7 @@ class SpritePool {
 
 function fogTint(dz: number): number {
   const f = fogf(dz);
-  return hex([255 - (255 - 216) * f, 255 - (255 - 200) * f, 255 - (255 - 174) * f]);
+  return hex([255 - (255 - 205) * f, 255 - (255 - 226) * f, 255 - (255 - 250) * f]);
 }
 
 function fogAlpha(dz: number): number {
@@ -282,10 +282,10 @@ export class WorldRenderer {
     this.skySpr = sp('sky', this.sky);
     this.sun = sp('glow', this.sky);
     this.sun.blendMode = 'add';
-    this.sun.tint = 0xffe2b0;
+    this.sun.tint = 0xfffae8;
     this.sunCore = sp('glow', this.sky);
     this.sunCore.blendMode = 'add';
-    this.sunCore.tint = 0xfff6e0;
+    this.sunCore.tint = 0xffffff;
 
     this.clouds = [];
     for (let i = 0; i < 9; i++) {
@@ -304,7 +304,7 @@ export class WorldRenderer {
     });
     this.horizon = sp('glow', this.sky);
     this.horizon.blendMode = 'add';
-    this.horizon.tint = 0xffdba4;
+    this.horizon.tint = 0xcfe6fc;
 
     const geom = new PIXI.Geometry({
       attributes: {
@@ -320,7 +320,7 @@ export class WorldRenderer {
           uRes: { value: [W, H], type: 'vec2<f32>' },
           uView: { value: [H * 0.36, Math.min(H * 1.15, W * 0.9), LTELE, 0], type: 'vec4<f32>' },
           uCam: { value: [0, 3.6, 0], type: 'vec3<f32>' },
-          uHaze: { value: [216 / 255, 198 / 255, 168 / 255], type: 'vec3<f32>' },
+          uHaze: { value: [205 / 255, 226 / 255, 250 / 255], type: 'vec3<f32>' },
           uTime: { value: 0, type: 'f32' },
         },
       },
@@ -805,12 +805,18 @@ export class WorldRenderer {
 
     this.root.scale.set(1);
     this.root.position.set(0, 0);
+    this.root.pivot.set(0, 0);
+    this.root.rotation = 0;
     if (z > 1.001 && eng.proj(0, 10, G.demonZ)) {
       const k = clamp((z - 1) / 0.6, 0, 1);
       const tx = lerp(eng.P.x, W / 2, k);
       const ty = lerp(eng.P.y, H * 0.42, k);
       this.root.scale.set(z);
       this.root.position.set(tx - eng.P.x * z, ty - eng.P.y * z);
+    } else if (cam.rot) {
+      this.root.pivot.set(W / 2, H / 2);
+      this.root.position.set(W / 2, H / 2);
+      this.root.rotation = cam.rot;
     }
 
     const hurt = !eng.player.alive && G.fate === 'serious' && G.deathT > 1;
@@ -1123,7 +1129,7 @@ export class WorldRenderer {
       sp.scale.set((2 * rPx) / 256);
       sp.rotation = p.seed;
       sp.tint = hex(puffColor(age));
-      sp.alpha = 0.09 * a * fogAlpha(dz);
+      sp.alpha = 0.16 * a * fogAlpha(dz);
     }
     this.smokePool.end();
 
@@ -1207,18 +1213,41 @@ export class WorldRenderer {
     // Speedlines & Cinematic Letterbox Bars
     const fx = this.fx;
     fx.clear();
-    if (eng.player.alive && eng.player.speed > 17 && G.state === 'play') {
-      const k = (eng.player.speed - 17) / 4;
-      for (let i = 0; i < 18; i++) {
-        const a = Math.random() * Math.PI * 2;
-        const r0 = H * (0.42 + Math.random() * 0.2);
-        const r1 = r0 + H * (0.15 + Math.random() * 0.3);
-        fx.moveTo(W / 2 + Math.cos(a) * r0 * 1.4, H * 0.5 + Math.sin(a) * r0).lineTo(
-          W / 2 + Math.cos(a) * r1 * 1.4,
-          H * 0.5 + Math.sin(a) * r1
-        );
+    // Anime Speed Dashes: dynamic wind slashes that intensify with gallop velocity
+    if (eng.player.alive && eng.player.speed > 13.5 && G.state === 'play') {
+      const k = clamp((eng.player.speed - 13.5) / 6.5, 0, 1);
+      const count = Math.floor(12 + 20 * k);
+      for (let i = 0; i < count; i++) {
+        const side = Math.random() < 0.5 ? -1 : 1;
+        const startX = W * 0.5 + side * (W * 0.18 + Math.random() * W * 0.36);
+        const startY = Math.random() * H;
+        const len = (70 + Math.random() * 200) * U * (0.6 + 0.6 * k);
+        const angle = Math.atan2(startY - H * 0.45, startX - W * 0.5) + (Math.random() - 0.5) * 0.12;
+        const endX = startX + Math.cos(angle) * len;
+        const endY = startY + Math.sin(angle) * len;
+        fx.moveTo(startX, startY).lineTo(endX, endY);
       }
-      fx.stroke({ width: 1.5 * U, color: 0xfff4e0, alpha: 0.18 * k });
+      fx.stroke({
+        width: Math.max(1, (1.2 + 1.6 * k) * U),
+        color: 0xffffff,
+        alpha: 0.12 + 0.28 * k,
+      });
+    }
+
+    // Dynamic Smoke Screen Engulfment: riding directly through dense signal plumes
+    if (G.smokeEngulf && G.smokeEngulf > 0.04 && eng.player.alive) {
+      const gAlpha = Math.min(0.44, G.smokeEngulf * 0.48);
+      fx.rect(0, 0, W, H).fill({ color: 0x1db954, alpha: gAlpha });
+    }
+
+    // 1-Frame WIT Studio Impact Flash & trauma flashes
+    if (G.impactFrame && G.impactFrame > 0) {
+      fx.rect(0, 0, W, H).fill({ color: 0xffffff, alpha: 0.95 });
+      G.impactFrame--;
+    } else if (G.flash > 0) {
+      fx.rect(0, 0, W, H).fill({ color: 0x8b0000, alpha: Math.min(0.55, G.flash * 0.45) });
+    } else if (G.rockFlash > 0) {
+      fx.rect(0, 0, W, H).fill({ color: 0xb45309, alpha: Math.min(0.35, G.rockFlash * 0.3) });
     }
 
     const cine =

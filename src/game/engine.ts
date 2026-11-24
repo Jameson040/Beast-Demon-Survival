@@ -105,6 +105,8 @@ export interface GameState {
   caption: string;
   flash: number;
   rockFlash: number;
+  impactFrame?: number;
+  smokeEngulf?: number;
   scenZ: number;
   rockZ: number;
   zoom: number;
@@ -526,7 +528,7 @@ export class GameEngine {
   /* ---------------- SIGNAL FLARES ---------------- */
   /** Three salvos, spaced across the whole 1,500 m charge, not bunched at the start. */
   private static readonly FLARE_MARKS = [220, 740, 1220];
-  private static readonly SMOKE: [number, number, number] = [72, 214, 108];
+  private static readonly SMOKE: [number, number, number] = [30, 220, 85];
 
   /** Every living rider fires together; canisters scatter over a 100 m radius around the Beast. */
   private fireSignalSalvo(): void {
@@ -885,8 +887,9 @@ export class GameEngine {
     };
     this.G.deathT = 0;
     this.G.slow = 0.18;
-    this.G.shake = 0.8;
+    this.G.shake = 0.85;
     this.G.flash = 1;
+    this.G.impactFrame = 2;
     const chunk = s.r > 0.06;
     const r = Math.random();
     if (s.hitPart === 'the rider') {
@@ -931,6 +934,7 @@ export class GameEngine {
     this.G.shake = 0.95;
     this.G.flash = 0.9;
     this.G.rockFlash = 0.85;
+    this.G.impactFrame = 2;
     // Thrown over a rock -> often injured in the grass so you witness Levi's assault, fatal at full sprint into crag/tree
     const hardHit = p.speed > 18.2 && !rock.jumpable;
     const r = Math.random();
@@ -1163,7 +1167,27 @@ export class GameEngine {
         for (const b of beats) {
           const a = Math.floor((ph0 - b) / 6.2832);
           const c = Math.floor((p.phase - b) / 6.2832);
-          if (c > a) sHoof();
+          if (c > a) {
+            sHoof();
+            if (p.speed > 13) {
+              const count = Math.random() < 0.65 ? 2 : 1;
+              for (let ci = 0; ci < count; ci++) {
+                this.parts.push({
+                  x: p.x + rand(-0.35, 0.35),
+                  y: 0.12,
+                  z: p.z - 0.45,
+                  vx: rand(-1.2, 1.2),
+                  vy: rand(1.8, 3.6),
+                  vz: -p.speed * 0.35 + rand(-2, 2),
+                  life: 0,
+                  max: rand(0.45, 0.75),
+                  size: rand(0.08, 0.16),
+                  col: Math.random() < 0.45 ? [98, 128, 44] : [94, 70, 46],
+                  dust: 0,
+                });
+              }
+            }
+          }
         }
       }
       const stumbleTilt = p.stumble > 0 ? Math.sin(this.G.t * 34) * p.stumble * 0.22 : 0;
@@ -1452,9 +1476,44 @@ export class GameEngine {
       this.G.zoom = 1;
     }
 
-    if (this.G.shake > 0) {
-      this.cam.x += rand(-1, 1) * this.G.shake * 0.5;
-      this.cam.y += rand(-1, 1) * this.G.shake * 0.3;
+    // Non-linear trauma shake (trauma^2) with rotational roll kick
+    const trauma = this.G.shake;
+    const trauma2 = trauma * trauma;
+    if (trauma2 > 0.0001) {
+      this.cam.x += rand(-1, 1) * trauma2 * 0.85;
+      this.cam.y += rand(-1, 1) * trauma2 * 0.52;
+      this.cam.rot = (this.cam.rot || 0) + rand(-1, 1) * trauma2 * 0.042;
+    }
+
+    // Dynamic banking roll when galloping and steering
+    if (p.alive) {
+      const bankTarget = clamp(-p.vx * 0.0024, -0.024, 0.024);
+      this.cam.rot = lerp(this.cam.rot || 0, bankTarget, Math.min(1, dt * 8));
+
+      // Dynamic Smoke Screen Engulfment calculation: riding through signal puffs
+      let smokeDensity = 0;
+      const px = p.x;
+      const pz = p.z;
+      const puffs = this.smokePuffs;
+      const puffLen = puffs.length;
+      for (let pi = 0; pi < puffLen; pi++) {
+        const sp = puffs[pi];
+        const age = this.G.t - sp.born;
+        if (age < 0 || age > 18) continue;
+        const dz = sp.z - pz;
+        if (Math.abs(dz) > 5) continue;
+        const dx = sp.x - px;
+        if (Math.abs(dx) > 4.5) continue;
+        const rad = 2.2 + age * 0.35;
+        const dist = Math.hypot(dx, dz);
+        if (dist < rad) {
+          smokeDensity += (1 - dist / rad) * Math.min(1, age * 0.6) * Math.max(0, 1 - age / 16);
+        }
+      }
+      this.G.smokeEngulf = lerp(this.G.smokeEngulf || 0, clamp(smokeDensity, 0, 1), Math.min(1, dt * 6));
+    } else {
+      this.cam.rot = lerp(this.cam.rot || 0, 0, Math.min(1, dt * 4));
+      this.G.smokeEngulf = 0;
     }
 
     if (SFX.ac && SFX.rumble && SFX.wind) {

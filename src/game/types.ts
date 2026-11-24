@@ -29,7 +29,7 @@ export const HPPM = 160;
 export const TPPM = 38;
 export const MPPM = 56;
 
-export const HAZE: [number, number, number] = [212, 194, 164];
+export const HAZE: [number, number, number] = [205, 226, 250];
 
 export type DiffKey = 'easy' | 'normal' | 'hard';
 
@@ -87,6 +87,7 @@ export interface CameraState {
   x: number;
   y: number;
   z: number;
+  rot?: number;
 }
 
 export interface ProjOut {
