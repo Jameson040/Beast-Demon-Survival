@@ -2,3 +2,5 @@ node_modules/
 dist/
 .local-checks/
 *.log
+Resources/
+src/assets/audio/counterattack_awakening.mp3

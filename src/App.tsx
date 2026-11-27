@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { audioInit } from './game/audio';
+import { audioInit, AudioMix, MIX, setAudioMix } from './game/audio';
 import { GameEngine } from './game/engine';
 import { WorldRenderer } from './game/renderer';
 import FieldPlan from './game/FieldPlan';
@@ -12,8 +12,6 @@ import {
   RIDERS,
   WIN_DIST,
 } from './game/types';
-
-const STYLE_LABELS = { classic: 'Classic', upgraded: 'Upgraded', rigged: 'Rigged' } as const;
 
 export default function App() {
   const mountRef = useRef<HTMLDivElement | null>(null);
@@ -38,11 +36,8 @@ export default function App() {
     diffName: DIFFS.normal.name,
   });
   const [muted, setMuted] = useState(false);
-  type Style = 'classic' | 'upgraded' | 'rigged';
-  const [styles, setStyles] = useState<{ horse: Style; rider: Style }>({
-    horse: 'classic',
-    rider: 'classic',
-  });
+  const [audioOpen, setAudioOpen] = useState(false);
+  const [mix, setMix] = useState<AudioMix>({ ...MIX });
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -186,15 +181,7 @@ export default function App() {
       last = now;
 
       if (sceneReady && eng.G.state === 'play') {
-        const ff =
-          !eng.player.alive &&
-          eng.G.fate !== 'dead' &&
-          eng.G.deathT > 3.5 &&
-          eng.monkey.state !== 'cut' &&
-          eng.levi.phase !== 'final'
-            ? 2.5
-            : 1;
-        const sdt = dt * eng.G.slow * ff;
+        const sdt = dt * eng.G.slow;
         const steps = Math.max(1, Math.ceil(sdt / 0.0085));
         for (let i = 0; i < steps; i++) {
           eng.update(sdt / steps);
@@ -236,18 +223,6 @@ export default function App() {
   const handleStart = () => { if (ready) engineRef.current?.startGame(); };
   const handleMenu = () => engineRef.current?.goToMenu();
   const handleDiff = (k: DiffKey) => engineRef.current?.setDifficulty(k);
-  const handleStyle = (kind: 'horse' | 'rider', value: Style) => {
-    // The rigged horse and rider are baked together from one rig, so they are chosen as a pair.
-    const next = value === 'rigged'
-      ? { horse: 'rigged' as Style, rider: 'rigged' as Style }
-      : { ...styles, [kind]: value };
-    setStyles(next);
-    const eng = engineRef.current;
-    if (eng) {
-      eng.horseStyle = next.horse;
-      eng.riderStyle = next.rider;
-    }
-  };
 
   const renderStats = () => (
     <div className="bds-stats">
@@ -297,12 +272,18 @@ export default function App() {
     );
   };
 
+  const handleMixChange = (key: keyof AudioMix, value: number) => {
+    setAudioMix(key, value);
+    setMix(prev => ({ ...prev, [key]: value }));
+  };
+
   return (
     <div ref={mountRef} className="relative w-screen h-screen overflow-hidden bg-black">
       <canvas ref={hudRef} id="hud" className="bds-canvas" />
 
       {!planOpen && (snap.state === 'play' || snap.state === 'pause') && (
         <nav className="game-tools" aria-label="Game controls">
+          <button onClick={() => setAudioOpen(v => !v)}>{audioOpen ? 'MIXER ×' : 'MIXER'}</button>
           <button onClick={() => togglePlanRef.current()}>FIELD PLAN <span>TAB</span></button>
           <button onClick={() => engineRef.current?.togglePause()}>{snap.state === 'pause' ? 'RESUME' : 'PAUSE'} <span>P</span></button>
           {snap.state === 'play' && snap.fate && (
@@ -310,6 +291,45 @@ export default function App() {
           )}
           <button onClick={() => engineRef.current?.goToMenu()}>MENU</button>
         </nav>
+      )}
+
+      {audioOpen && !planOpen && (snap.state === 'play' || snap.state === 'pause') && (
+        <div className="bds-mixer" role="region" aria-label="Live audio mixer">
+          <div className="bds-mixer-head">
+            <span>AUDIO MIXER</span>
+            <button
+              type="button"
+              onClick={() => {
+                const m = engineRef.current?.toggleMute();
+                if (m !== undefined) setMuted(!m);
+              }}
+            >
+              {muted ? 'UNMUTE (M)' : 'MUTE (M)'}
+            </button>
+          </div>
+          {(
+            [
+              ['master', 'Master', 1.2],
+              ['music', 'Music', 1.2],
+              ['hooves', 'Hooves', 1.5],
+              ['screams', 'Screams', 1.5],
+              ['sfx', 'SFX & Stones', 1.5],
+            ] as [keyof AudioMix, string, number][]
+          ).map(([key, label, max]) => (
+            <label key={key} className="bds-mixer-row">
+              <span>{label}</span>
+              <input
+                type="range"
+                min={0}
+                max={max}
+                step={0.02}
+                value={mix[key]}
+                onChange={e => handleMixChange(key, parseFloat(e.target.value))}
+              />
+              <b>{Math.round(mix[key] * 100)}%</b>
+            </label>
+          ))}
+        </div>
       )}
 
       {snap.state === 'play' && muted && (
@@ -392,33 +412,9 @@ export default function App() {
                 </button>
               ))}
             </div>
-            <div className="bds-btns bds-style-row">
-              <span className="bds-style-label">Horse</span>
-              {(['classic', 'upgraded', 'rigged'] as const).map(v => (
-                <button
-                  key={`horse-${v}`}
-                  className={`bds-btn bds-btn-alt bds-btn-small ${styles.horse === v ? 'bds-btn-sel' : ''}`}
-                  onClick={() => handleStyle('horse', v)}
-                >
-                  {STYLE_LABELS[v]}
-                </button>
-              ))}
-            </div>
-            <div className="bds-btns bds-style-row">
-              <span className="bds-style-label">Rider</span>
-              {(['classic', 'upgraded', 'rigged'] as const).map(v => (
-                <button
-                  key={`rider-${v}`}
-                  className={`bds-btn bds-btn-alt bds-btn-small ${styles.rider === v ? 'bds-btn-sel' : ''}`}
-                  onClick={() => handleStyle('rider', v)}
-                >
-                  {STYLE_LABELS[v]}
-                </button>
-              ))}
-            </div>
             <div className="bds-btns">
               <button className="bds-btn" onClick={handleStart} disabled={!ready}>
-                {ready ? 'RIDE OUT (Enter)' : 'PREPARING THE FIELD...'}
+                {ready ? 'RIDE TO YOUR DOOM (Enter)' : 'PREPARING THE FIELD...'}
               </button>
               <button className="bds-btn bds-btn-alt" onClick={() => togglePlanRef.current()}>FIELD PLAN (Tab)</button>
             </div>
@@ -446,7 +442,7 @@ export default function App() {
                 {snap.fate === 'dead'
                   ? 'You never saw what happened next.'
                   : snap.fate === 'serious'
-                    ? 'Through blood and blur you saw Titans falling one after another. Levi blinded the Beast and tore Zeke from its nape, but the Cart Titan carried him away.'
+                    ? 'Through blood-tinted, fluttering eyes you saw Titans falling one after another. Levi blinded the Beast and tore Zeke from its nape, but the Cart Titan carried him away.'
                     : 'From the grass you watched Levi cut through the Titans, disable the Beast and pull Zeke from its nape. The Cart Titan snatched him away before Levi could finish it.'}
               </i>
             </p>

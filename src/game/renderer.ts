@@ -1,7 +1,6 @@
 import * as PIXI from 'pixi.js';
 import { ART, buildArt } from './art';
 import { PUFF_LIFE, puffAlpha, puffColor, puffPosition, puffRadius } from './smoke';
-import { ensureUpgradedArt, SADDLE_H, UPPM } from './horse3d';
 import { ensureRiggedHorse, RIGGED } from './riggedHorse';
 import { GameEngine } from './engine';
 import {
@@ -55,22 +54,28 @@ void main() {
   vec2 w = vec2(uCam.x + (px.x - uRes.x * 0.5) / s, uCam.z + dz);
   float big = fbm(w * 0.008);
   float mid = fbm(w * 0.028 + 3.0);
-  float clump = fbm(w * 0.11 + 11.0);
-  vec3 deep = vec3(0.24, 0.40, 0.15), meadow = vec3(0.46, 0.62, 0.22), sunlit = vec3(0.66, 0.72, 0.28);
-  vec3 dry = vec3(0.74, 0.66, 0.34), dirt = vec3(0.52, 0.38, 0.22);
+  float clump = fbm(w * 0.14 + 11.0);
+  vec3 deep = vec3(0.18, 0.30, 0.12), meadow = vec3(0.35, 0.49, 0.17), sunlit = vec3(0.57, 0.63, 0.23);
+  vec3 dry = vec3(0.67, 0.59, 0.29), dirt = vec3(0.47, 0.34, 0.19);
   vec3 c = mix(deep, meadow, mid);
-  c = mix(c, sunlit, smoothstep(0.42, 0.72, clump) * 0.58);
-  c = mix(c, dry, smoothstep(0.55, 0.78, big) * 0.68);
-  c = mix(c, dirt, smoothstep(0.62, 0.8, fbm(w * 0.02 + 9.0)) * 0.52);
-  // Worn cavalry track out of the gate, plus a pair of wheel ruts
+  c = mix(c, sunlit, smoothstep(0.38, 0.72, clump) * 0.62);
+  c = mix(c, dry, smoothstep(0.52, 0.78, big) * 0.65);
+  c = mix(c, dirt, smoothstep(0.60, 0.78, fbm(w * 0.022 + 9.0)) * 0.56);
+  // Worn cavalry track out of the gate, plus wheel & hoof ruts
   float road = exp(-pow(w.x / 11.0, 2.0));
   float rut = exp(-pow((abs(w.x) - 3.2) / 0.55, 2.0)) * 0.35;
-  c = mix(c, dirt * vec3(1.05, 0.98, 0.9), (road * 0.42 + rut) * (1.0 - smoothstep(30.0, 1400.0, w.y)));
-  // Wind across the grass. High-frequency detail fades with distance so it never becomes a screen grid.
+  c = mix(c, dirt * vec3(1.05, 0.98, 0.9), (road * 0.44 + rut) * (1.0 - smoothstep(30.0, 1400.0, w.y)));
+  // Wind across the grass + crisp near-field grass blades & turf grain beneath hooves
   float wave = sin(w.y * 0.055 + w.x * 0.02 - uTime * 1.1 + mid * 4.0) * 0.5 + 0.5;
-  c *= 0.9 + 0.14 * wave;
-  float detail = clamp(s / 40.0, 0.0, 1.0);
-  c *= mix(1.0, 0.86 + 0.28 * fbm(w * 0.22), detail);
+  c *= 0.9 + 0.15 * wave;
+  float bladeMask = clamp(s / 16.0, 0.0, 1.0);
+  float microMask = clamp(s / 48.0, 0.0, 1.0);
+  float blades = fbm(vec2(w.x * 4.2 + wave * 0.35, w.y * 1.9));
+  float tufts = noise(vec2(w.x * 11.5, w.y * 5.5));
+  float grain = hash(floor(w * 18.0));
+  c = mix(c, c * (0.76 + 0.52 * blades), bladeMask * 0.72);
+  c *= mix(1.0, 0.84 + 0.32 * tufts, bladeMask);
+  c *= mix(1.0, 0.88 + 0.24 * grain, microMask);
   c += vec3(0.045, 0.032, 0.01) * wave * (1.0 - clamp(dz / 700.0, 0.0, 1.0));
   float f = clamp(1.0 - exp(-dz / 1500.0), 0.0, 0.72);
   float hz = smoothstep(0.0, 1.0, clamp((dz - 600.0) / 2500.0, 0.0, 1.0));
@@ -174,6 +179,7 @@ export class WorldRenderer {
   private root!: PIXI.Container;
   private sky!: PIXI.Container;
   private skySpr!: PIXI.Sprite;
+  private panorama!: PIXI.TilingSprite;
   private sun!: PIXI.Sprite;
   private sunCore!: PIXI.Sprite;
   private clouds: { s: PIXI.Sprite; x: number; y: number; k: number; sp: number }[] = [];
@@ -190,6 +196,7 @@ export class WorldRenderer {
   private wallMeshes: PIXI.MeshSimple[] = [];
   private foliageOpacity = new Map<number, number>();
   private lines!: PIXI.Graphics;
+  private leviTrail: { x: number; y: number; z: number }[] = [];
   private smokePool!: SpritePool;
   private smokeLayer!: PIXI.Container;
   private rays!: PIXI.Container;
@@ -197,7 +204,6 @@ export class WorldRenderer {
 
   private fx!: PIXI.Graphics;
   private grade!: PIXI.ColorMatrixFilter;
-  private blur!: PIXI.BlurFilter;
   private letter = 0;
 
   private B!: {
@@ -252,6 +258,7 @@ export class WorldRenderer {
     mount.insertBefore(app.canvas, mount.firstChild);
 
     buildArt();
+    ensureRiggedHorse();
     this.buildScene(width, height);
   }
 
@@ -280,6 +287,13 @@ export class WorldRenderer {
     this.sky = new PIXI.Container();
     this.root.addChild(this.sky);
     this.skySpr = sp('sky', this.sky);
+    this.panorama = new PIXI.TilingSprite({
+      texture: ART.tex.panorama || PIXI.Texture.EMPTY,
+      width: 100,
+      height: 720,
+    });
+    this.panorama.visible = false;
+    this.sky.addChild(this.panorama);
     this.sun = sp('glow', this.sky);
     this.sun.blendMode = 'add';
     this.sun.tint = 0xfffae8;
@@ -360,7 +374,6 @@ export class WorldRenderer {
     this.grade = new PIXI.ColorMatrixFilter();
     this.grade.contrast(0.11, false);
     this.grade.saturate(0.1, true);
-    this.blur = new PIXI.BlurFilter({ strength: 0, quality: 3 });
     this.root.filters = [this.grade];
     this.letter = 0;
   }
@@ -529,8 +542,9 @@ export class WorldRenderer {
     B.alpha.alpha = fogAlpha(dz);
     const tint = fogTint(dz);
     const cut = m.state === 'cut';
+    const staggerX = cut && m.eyesCut && !m.legsCut ? Math.sin(m.t * 5.2) * 1.35 : 0;
     const br = cut ? 0 : Math.sin(eng.G.t * 2) * 0.15;
-    const sw = cut ? 0 : Math.sin(eng.G.t * 0.9) * 0.25;
+    const sw = cut ? staggerX : Math.sin(eng.G.t * 0.9) * 0.25;
 
     // Ground contact shadow beneath the 20m Beast
     if (dz < 1650) {
@@ -553,15 +567,17 @@ export class WorldRenderer {
       B.kneeStump[i].scale.set(1.1 / MPPM, 0.5 / MPPM);
     }
 
-    B.body.position.set(cut ? 14 * (m.tip || 0) : 0, 0);
-    B.body.rotation = cut ? (m.tip || 0) * 1.45 : 0;
+    const tip = cut ? m.tip || 0 : 0;
+    B.body.position.set(cut ? 1.8 * tip + staggerX : 0, cut ? -3.1 * tip : 0);
+    B.body.rotation = cut ? tip * 1.72 : 0;
     B.drop.position.set(0, cut ? (m.drop || 0) * 4.2 : 0);
 
     for (let i = 0; i < 2; i++) {
       const sd = i ? 1 : -1;
-      limb(B.thigh[i], 'mThigh', sd * 2.2, 8, sd * 3.6, m.legsCut ? 4.6 : 4.4);
+      const hipX = sd * 2.2 + sw * 0.25;
+      limb(B.thigh[i], 'mThigh', hipX, 8, sd * 3.6, m.legsCut ? 4.6 : 4.4);
     }
-    B.torso.position.set(sw * 0.3, -(11.8 + br));
+    B.torso.position.set(sw * 0.45, -(11.8 + br));
     scaleTo(B.torso, 'mTorso');
 
     const arms: [number, number, number][] = [
@@ -574,33 +590,36 @@ export class WorldRenderer {
       const gone = sd > 0 ? !!m.armCut : !!m.leftArmCut;
       B.upper[i].visible = B.fore[i].visible = B.hand[i].visible = !gone;
       if (!gone) {
-        limb(B.upper[i], 'mUpper', sd * 3.8 + sw * 0.3, 15 + br, h[0], h[1]);
-        limb(B.fore[i], 'mFore', h[0], h[1], h[2], h[3]);
-        B.hand[i].position.set(h[2], -h[3]);
+        const sx = sd * 3.8 + sw * 0.45;
+        limb(B.upper[i], 'mUpper', sx, 15 + br, h[0] + sw * 0.45, h[1]);
+        limb(B.fore[i], 'mFore', h[0] + sw * 0.45, h[1], h[2] + sw * 0.45, h[3]);
+        B.hand[i].position.set(h[2] + sw * 0.45, -h[3]);
         scaleTo(B.hand[i], 'mHand');
       }
     }
     B.armStump.visible = !!m.armCut;
     if (m.armCut) {
-      const ex = 3.8 + Math.sin(m.aR) * 1.6;
+      const ex = 3.8 + sw * 0.45 + Math.sin(m.aR) * 1.6;
       const ey = 15 - Math.cos(m.aR) * 1.6;
       B.armStump.position.set(ex, -ey);
       B.armStump.scale.set(1 / MPPM);
     }
     B.leftStump.visible = !!m.leftArmCut;
     if (m.leftArmCut) {
-      B.leftStump.position.set(-4.3, -14.1);
+      const ex = -3.8 + sw * 0.45 - Math.sin(m.aL) * 1.6;
+      const ey = 15 - Math.cos(m.aL) * 1.6;
+      B.leftStump.position.set(ex, -ey);
       B.leftStump.scale.set(1 / MPPM);
     }
-    const hr = eng.armHand(1, m.aR, m.bR);
+    const hr = eng.armHand(-1, m.aL, m.bL);
     const holding = m.holding && ((m.state === 'pick' && m.t > 0.4) || m.state === 'crush');
     B.held.visible = holding;
     if (holding) {
       if (m.state === 'crush') B.held.position.set(0.8, -8.7);
-      else B.held.position.set(hr[2], -(hr[3] + 0.6));
+      else B.held.position.set(hr[2] + sw * 0.45, -(hr[3] + 0.6));
       B.held.scale.set(2 / 176);
     }
-    const hx = sw * 0.5;
+    const hx = sw * 0.65;
     const hy = 17.3 + br;
     B.head.position.set(hx, -hy);
     scaleTo(B.head, 'mHead');
@@ -622,36 +641,46 @@ export class WorldRenderer {
     B.eyeGlow.alpha = 0.5 * glow + Math.sin(eng.G.t * 3) * 0.08;
 
     let si = 0;
-    const slash = (x0: number, y0: number, x1: number, y1: number, a: number) => {
+    const slash = (x0: number, y0: number, x1: number, y1: number, a: number, thick = 0.85) => {
       const sl = B.slashes[si++];
       if (!sl) return;
       sl.visible = true;
       sl.alpha = a;
       sl.position.set((x0 + x1) / 2, -(y0 + y1) / 2);
       sl.rotation = Math.atan2(-(y1 - y0), x1 - x0);
-      sl.scale.set(Math.hypot(x1 - x0, y1 - y0) / 512, (1 / 16) * 0.6);
+      sl.scale.set(Math.hypot(x1 - x0, y1 - y0) / 512, (1 / 16) * thick);
     };
-    if (cut && m.t < 2) {
-      const h = eng.armHand(1, m.aR, m.bR);
-      for (let i = 0; i < 3; i++) {
-        const pt = eng.armPoint(h, Math.random());
+    if (cut && m.t < 2.05) {
+      const h = eng.armHand(-1, m.aL, m.bL);
+      for (let i = 0; i < 4; i++) {
+        const pt = eng.armPoint(h, Math.random(), -1);
         slash(
-          pt[0] - 1.8,
-          pt[1] + rand(-0.7, 0.7),
-          pt[0] + 1.8,
-          pt[1] + rand(-0.7, 0.7),
-          0.5 + (m.flash || 0) * 0.5
+          pt[0] + sw * 0.45 - 2.4,
+          pt[1] + rand(-1.0, 1.0),
+          pt[0] + sw * 0.45 + 2.4,
+          pt[1] + rand(-1.0, 1.0),
+          0.65 + (m.flash || 0) * 0.35,
+          0.95
         );
       }
     }
-    if (m.eyesCut && m.t < 3.2) {
-      slash(hx - 2.8, hy + 0.35, hx + 2.8, hy - 0.1, clamp(1 - (m.t - 2.6) / 0.6, 0, 1));
+    if (cut && m.eyesCut && m.t >= 2.85 && m.t < 3.65) {
+      const fade = clamp(1 - (m.t - 2.85) / 0.8, 0, 1);
+      slash(hx - 3.6, hy + 0.5, hx + 3.6, hy - 0.3, fade, 1.15);
+      slash(hx - 3.2, hy - 0.5, hx + 3.2, hy + 0.4, fade * 0.85, 0.9);
     }
-    if (m.legsCut && m.t < 3.9) {
-      slash(-6.5, 4.6, 6.5, 4.2, clamp(1 - (m.t - 3.4) / 0.5, 0, 1));
+    if (cut && m.legsCut && m.t >= 4.25 && m.t < 4.95) {
+      const fade = clamp(1 - (m.t - 4.25) / 0.7, 0, 1);
+      slash(-6.8, 2.2, -1.2, 1.4, fade, 1.1);
+      slash(1.2, 1.4, 6.8, 2.2, fade, 1.1);
     }
-    if (m.napeCut && m.t < 6.85) {
-      slash(-2.8, 17.9, 2.8, 18.2, clamp(1 - (m.t - 6.25) / 0.6, 0, 1));
+    if (cut && m.t >= 7.45 && m.t < 9.1) {
+      // Rapid hack-and-slash flashes at the fallen Beast's nape
+      for (let i = 0; i < 4; i++) {
+        const cx = rand(-3.5, 3.5);
+        const cy = rand(10.5, 14.5);
+        slash(cx - 2.6, cy + rand(-1.4, 1.4), cx + 2.6, cy + rand(-1.4, 1.4), 0.75 + rand(0, 0.25), 1.05);
+      }
     }
     for (; si < B.slashes.length; si++) B.slashes[si].visible = false;
 
@@ -704,22 +733,53 @@ export class WorldRenderer {
   private drawRiderSprites(eng: GameEngine, o: RiderEntity): void {
     if (o.coat === undefined) o.coat = Math.max(0, HORSE_COLS.indexOf(o.col));
     if (!o.alive) {
-      if (!eng.proj(o.x, 0, o.z)) return;
-      const s = eng.P.s;
-      const dz = eng.P.dz;
-      const tint = fogTint(dz);
-      const al = fogAlpha(dz);
-      const ang = Math.min(o.tumble * 3, 1.45) * o.tdir;
-      const h = this.put('horseFall', eng.P.x, eng.P.y, (s / HPPM) * 0.9, -dz);
-      h.rotation = o.tumble < 0.5 ? ang * 0.3 : 0;
-      h.tint = hexMul(o.col, tint);
-      h.alpha = al;
-      const rx = o.tdir * Math.min(o.tumble * 4, 1.6);
-      const ry = Math.max(0.1, 1.8 - o.tumble * 4);
-      const r = this.put('riderFall', eng.P.x + rx * s, eng.P.y - ry * s, s / HPPM, -dz + 0.01);
-      r.rotation = o.tdir * Math.max(0, 1 - o.tumble * 2) * 1.2;
-      r.tint = tint;
-      r.alpha = al;
+      // 1. Collapsed horse at (o.x, o.y, o.z)
+      if (eng.proj(o.x, o.y, o.z)) {
+        const s = eng.P.s;
+        const dz = eng.P.dz;
+        if (dz > 0.6 && dz < 460) {
+          const tint = fogTint(dz);
+          const al = fogAlpha(dz);
+          const flip = o.tdir < 0 ? -1 : 1;
+          const fallK = clamp(o.tumble / 0.4, 0, 1);
+          const h = this.put('horseFall', eng.P.x, eng.P.y, (s / HPPM) * 0.92, -dz);
+          h.scale.x *= flip;
+          h.rotation = flip * ((1 - fallK) * -0.45 + 0.04);
+          h.tint = hexMul(o.col, tint);
+          h.alpha = al;
+          if (dz < 220 && eng.proj(o.x, 0, o.z)) {
+            const sh = this.shadowPool.get('shadow');
+            sh.position.set(eng.P.x, eng.P.y);
+            sh.scale.set((eng.P.s * 2.8) / 128, (eng.P.s * 1.1) / 64);
+            sh.alpha = 0.42 * al;
+          }
+        }
+      }
+      // 2. Thrown Scout rider separated independently at (o.rx, o.ry, o.rz)
+      const rxW = o.rx ?? o.x + o.tdir * 2.2;
+      const ryW = o.ry ?? 0;
+      const rzW = o.rz ?? o.z + 2.5;
+      if (eng.proj(rxW, ryW, rzW)) {
+        const s = eng.P.s;
+        const dz = eng.P.dz;
+        if (dz > 0.6 && dz < 460) {
+          const tint = fogTint(dz);
+          const al = fogAlpha(dz);
+          const flip = o.tdir < 0 ? -1 : 1;
+          const r = this.put('riderFall', eng.P.x, eng.P.y, (s / HPPM) * 0.95, -dz + 0.01);
+          r.scale.x *= flip;
+          r.rotation = o.rrot ?? 0;
+          r.tint = tint;
+          r.alpha = al;
+          if (dz < 220 && eng.proj(rxW, 0, rzW)) {
+            const sh = this.shadowPool.get('shadow');
+            const lift = clamp(1 - ryW * 0.25, 0.35, 1);
+            sh.position.set(eng.P.x, eng.P.y);
+            sh.scale.set((eng.P.s * 1.9 * lift) / 128, (eng.P.s * 0.75 * lift) / 64);
+            sh.alpha = 0.38 * lift * al;
+          }
+        }
+      }
       return;
     }
 
@@ -737,20 +797,14 @@ export class WorldRenderer {
     const yaw = dx / rs + (1.7 * (o.vx || 0)) / Math.max(4, o.speed || 15);
     o.yawS = o.yawS === undefined ? yaw : lerp(o.yawS, yaw, 0.25);
     const vi = clamp(Math.round(o.yawS / 0.4) + 2, 0, HORSE_VIEWS.length - 1);
-    const upH = eng.horseStyle === 'upgraded';
-    const upR = eng.riderStyle === 'upgraded';
-    // The third option is baked from the rigged 3D horse and its mounted rider.
-    const rigH = eng.horseStyle === 'rigged' && ART.tex.rhorse0_0 !== undefined;
-    const rigR = eng.riderStyle === 'rigged' && ART.tex.rrider0_0 !== undefined;
-    const vi7 = clamp(Math.round(o.yawS / 0.27) + 3, 0, 6);
+    const rigH = ART.tex.rhorse0_0 !== undefined;
+    const rigR = ART.tex.rrider0_0 !== undefined;
     const rigView = clamp(Math.round(o.yawS / RIGGED.step) + RIGGED.center, 0, RIGGED.views - 1);
     const rigFrame = ((Math.floor((o.phase / (Math.PI * 2)) * RIGGED.frames) % RIGGED.frames) + RIGGED.frames) % RIGGED.frames;
     const h = rigH
       ? this.put(`rhorse${rigView}_${rigFrame}`, rx, ry, rs / RIGGED.uppm, -dz)
-      : upH
-        ? this.put(`uhorse${vi7}_${f}`, rx, ry, rs / UPPM, -dz)
-        : this.put(`horse${vi}_${f}`, rx, ry, rs / HPPM, -dz);
-    if (!upH && !rigH) h.skew.x = Math.asin(clamp(-(o.yawS - HORSE_VIEWS[vi]) / 0.74, -0.3, 0.3));
+      : this.put(`horse${vi}_${f}`, rx, ry, rs / HPPM, -dz);
+    if (!rigH) h.skew.x = Math.asin(clamp(-(o.yawS - HORSE_VIEWS[vi]) / 0.74, -0.3, 0.3));
     if (rigH) h.rotation = -o.lean * 0.3; // lean into turns
     if (o.stumble > 0.01) {
       h.rotation = Math.sin(eng.G.t * 36) * o.stumble * 0.16;
@@ -765,15 +819,10 @@ export class WorldRenderer {
     const cf = ((Math.floor((o.phase / (Math.PI * 2)) * 6 + (o.ph || 0)) % 6) + 6) % 6;
     const r = rigR
       ? this.put(`rrider${rigView}_${rigFrame}`, rx, ry, rs / RIGGED.uppm, -dz + 0.01)
-      : upR
-        ? this.put(`urider${vi7}_${f}`, rx, ry - SADDLE_H * rs, rs / UPPM, -dz + 0.01)
-        : this.put('rider' + cf, sx, sy, (rs * 0.9) / HPPM, -dz + 0.01);
+      : this.put('rider' + cf, sx, sy, (rs * 0.9) / HPPM, -dz + 0.01);
     if (rigR) {
       // Baked together with the same rig, view and frame, so the seat is exact.
       r.rotation = -o.lean * 0.35;
-      r.skew.set(0, 0);
-    } else if (upR) {
-      r.rotation = o.lean * 0.5;
       r.skew.set(0, 0);
     } else {
       r.rotation = o.lean + Math.sin(phq * 2 + 0.4) * 0.025;
@@ -797,7 +846,6 @@ export class WorldRenderer {
     const cam = eng.cam;
     const G = eng.G;
     ensureRiggedHorse();
-    if (eng.horseStyle === 'upgraded' || eng.riderStyle === 'upgraded') ensureUpgradedArt();
     const yInf = HOR + (cam.y * F) / LTELE;
     const z = G.zoom || 1;
     eng.proj(0, 11, G.demonZ);
@@ -819,38 +867,53 @@ export class WorldRenderer {
       this.root.rotation = cam.rot;
     }
 
-    const hurt = !eng.player.alive && G.fate === 'serious' && G.deathT > 1;
-    if (hurt) {
-      this.blur.strength = (5 + 3 * Math.sin(G.t * 1.7)) * U;
-      this.root.filters = [this.grade, this.blur];
-    } else {
-      this.root.filters = [this.grade];
-    }
+    // Keep scene crisp and clear in all states (serious injury uses red tint + blinking eyelids in HUD)
+    this.root.filters = [this.grade];
 
-    // Sky, Sun, Clouds & Mountains
+    // Sky, Painterly Panorama, Sun, Clouds & Mountains
     this.skySpr.position.set(-W, -H * 0.6);
     this.skySpr.width = 3 * W;
     this.skySpr.height = yInf + H * 0.6 + 2;
+    const hasPano = !!ART.tex.panorama;
+    if (hasPano) {
+      if (this.panorama.texture !== ART.tex.panorama) this.panorama.texture = ART.tex.panorama;
+      const panoH = Math.max(yInf + H * 0.6 + 6, 480 * U);
+      const pScale = panoH / 720;
+      this.panorama.visible = true;
+      this.panorama.position.set(-W, yInf + 6 - panoH);
+      this.panorama.width = 3 * W;
+      this.panorama.height = panoH;
+      this.panorama.tileScale.set(pScale);
+      this.panorama.tilePosition.x = -cam.x * 0.42 * U;
+    } else {
+      this.panorama.visible = false;
+    }
+
     const sunX = W * 0.76 - cam.x * 0.25;
     const sunY = yInf * 0.42;
     this.sun.position.set(sunX, sunY);
     this.sun.scale.set(4.8 * U);
-    this.sun.alpha = 0.46;
+    this.sun.alpha = hasPano ? 0.34 : 0.46;
     this.sunCore.position.set(sunX, sunY);
     this.sunCore.scale.set(1.35 * U);
-    this.sunCore.alpha = 0.96;
+    this.sunCore.alpha = hasPano ? 0.72 : 0.96;
 
     for (const c of this.clouds) {
       const x = ((((c.x - cam.x * 0.0003 + G.t * 0.0015 * c.sp) % 1.4) + 1.4) % 1.4) - 0.2;
       c.s.position.set(x * W, c.y * yInf);
       c.s.scale.set(U * c.k * 1.3);
-      c.s.alpha = 0.85;
+      c.s.alpha = hasPano ? 0.22 : 0.85;
     }
 
     const ms = [0.62, 0.48, 0.3];
     const par = [0.4, 0.9, 1.8];
     for (let i = 0; i < 3; i++) {
       const t = this.mtns[i];
+      if (hasPano) {
+        t.visible = false;
+        continue;
+      }
+      t.visible = true;
       const sc = U * ms[i] * 1.2;
       t.position.set(-W, yInf - 360 * sc + 2);
       t.width = 3 * W;
@@ -902,28 +965,33 @@ export class WorldRenderer {
       d.alpha = sc.alpha * fogAlpha(dz);
     }
 
-    // 0b. Craters and skid marks left where shrapnel landed (they persist until they pass behind the camera)
+    // 0b. Craters, skid marks, and flat ground-hugging crimson blood pools (never rotated vertically!)
     for (const sc of eng.scars) {
       const dz = sc.z - cam.z;
       if (dz < 0.8 || dz > 320) continue;
       if (!eng.proj(sc.x, 0, sc.z)) continue;
-      const crater = sc.kind === 0;
-      const dc = this.shadowPool.get(crater ? 'scar' + ((Math.floor(sc.x * 13) % 3 + 3) % 3) : 'skid');
-      const w = eng.P.s * sc.r * 2.4;
+      const idx = ((Math.floor(Math.abs(sc.x) * 13) % 3) + 3) % 3;
+      const texName = sc.kind === 2 ? 'blood' + idx : sc.kind === 0 ? 'scar' + idx : 'skid';
+      const dc = this.shadowPool.get(texName);
+      const w = eng.P.s * sc.r * (sc.kind === 2 ? 2.8 : 2.4);
       dc.position.set(eng.P.x, eng.P.y);
-      dc.scale.set(w / 128, (w * (crater ? 0.6 : 0.5)) / 128);
-      dc.alpha = Math.min(1, sc.a * 1.25) * fogAlpha(dz);
+      dc.rotation = 0;
+      if (sc.kind === 2 && sc.ang > Math.PI) dc.scale.x = -w / 128;
+      else dc.scale.x = w / 128;
+      dc.scale.y = (w * (sc.kind === 0 ? 0.55 : sc.kind === 2 ? 0.30 : 0.45)) / 128;
+      dc.alpha = Math.min(1, sc.a * 1.15) * fogAlpha(dz);
     }
 
     // 1. Monumental City Wall & Shiganshina Outskirts Structures
-    for (const w of eng.walls) {
+    for (let wi = 0; wi < eng.walls.length; wi++) {
+      const w = eng.walls[wi];
       const dz = w.z - cam.z;
       if (dz < 1 || dz > 1750) continue;
       if (!eng.proj(w.x, 0, w.z)) continue;
       const m = ART.meta[w.tex];
       if (!m) continue;
       const sc = (eng.P.s / m.ppm) * w.scale;
-      const s = this.put(w.tex, eng.P.x, eng.P.y, sc, -dz);
+      const s = this.put(w.tex, eng.P.x, eng.P.y, sc, -dz - wi * 0.0001);
       if (w.flip) s.scale.x *= -1;
       s.tint = fogTint(dz);
       s.alpha = fogAlpha(dz);
@@ -997,15 +1065,15 @@ export class WorldRenderer {
     for (const r of eng.riders) this.drawRiderSprites(eng, r);
     this.drawRiderSprites(eng, eng.player);
 
-    // 5. Pure Titans Arc
+    // 5. Pure Titans Arc (eerie breathing, swaying, grounded shadows & facing inward—never blank black faces)
     for (const t of eng.titans) {
       if (t.v === undefined) t.v = eng.titans.indexOf(t) % 8;
       if (!eng.proj(t.x, 0, t.z)) continue;
       const towardCamera = Math.sin(t.heading) * (cam.x - t.x) + Math.cos(t.heading) * (cam.z - t.z);
-      const name = (towardCamera < 0 ? 'titanBack' : 'titan') + t.v;
-      const s = this.put(name, eng.P.x, eng.P.y, (eng.P.s / TPPM) * (t.h / 15), -eng.P.dz);
+      const s = this.put('titan' + t.v, eng.P.x, eng.P.y, (eng.P.s / TPPM) * (t.h / 15), -eng.P.dz);
       const facing = Math.abs(towardCamera) / Math.max(1, Math.hypot(cam.x - t.x, cam.z - t.z));
-      s.scale.x *= 0.78 + 0.22 * facing;
+      const mirror = t.v & 2 ? -1 : 1;
+      s.scale.x *= mirror * (0.84 + 0.16 * facing);
       let ang = 0;
       let al = fogAlpha(eng.P.dz);
       if (t.state === 'falling') ang = t.fdir * t.fall * t.fall * 1.52;
@@ -1013,11 +1081,20 @@ export class WorldRenderer {
         ang = t.fdir * 1.52;
         al *= clamp(1 - (t.down - 20) / 25, 0.25, 1);
       } else {
-        ang = t.lean + Math.sin(G.t * 0.7 + t.ph) * 0.03;
+        const breath = Math.sin(G.t * 1.45 + t.ph);
+        s.scale.y *= 1 + breath * 0.022;
+        s.scale.x *= 1 - breath * 0.012;
+        ang = t.lean + Math.sin(G.t * 0.9 + t.ph) * 0.048 + Math.sin(G.t * 3.1 + t.ph * 2) * 0.012;
       }
       s.rotation = ang;
       s.tint = fogTint(eng.P.dz);
       s.alpha = al;
+      if (eng.P.dz < 650 && t.state === 'stand') {
+        const sh = this.shadowPool.get('shadow');
+        sh.position.set(eng.P.x, eng.P.y);
+        sh.scale.set((eng.P.s * (t.h * 0.36)) / 128, (eng.P.s * (t.h * 0.14)) / 64);
+        sh.alpha = 0.38 * al;
+      }
       if (t.slash > 0) {
         const sl = this.put(
           'slash',
@@ -1133,18 +1210,6 @@ export class WorldRenderer {
     }
     this.smokePool.end();
 
-    // Canister heads: a small dark body with a tiny hot spot, not a glowing orb.
-    for (const fl of eng.flares) {
-      if (!eng.proj(fl.x, fl.y, fl.z)) continue;
-      const body = this.put('stone0', eng.P.x, eng.P.y, Math.max(2.2 * U, eng.P.s * 0.1) / 40, -eng.P.dz + 0.2);
-      body.tint = 0x2a3a28;
-      body.rotation = fl.life * 8;
-      const hot = this.put('glow', eng.P.x, eng.P.y, Math.max(1.4 * U, eng.P.s * 0.12) / 128, -eng.P.dz + 0.3);
-      hot.blendMode = 'add';
-      hot.tint = 0xffd9a0;
-      hot.alpha = 0.5;
-    }
-
     // 10. Particles (Dust, Steam, Stone Chips, Flare Smoke)
     for (const q of eng.parts) {
       if (!eng.proj(q.x, q.y, q.z)) continue;
@@ -1169,20 +1234,47 @@ export class WorldRenderer {
       }
     }
 
-    // 11. Captain Levi & ODM Grapple Wires
+    // 11. Captain Levi, ODM Gas Ribbon & Twin Grapple Wires
     this.lines.clear();
     const levi = eng.levi;
+    if (levi.active && !levi.hidden) {
+      this.leviTrail.push({ x: levi.x, y: levi.y, z: levi.z });
+      if (this.leviTrail.length > 12) this.leviTrail.shift();
+      // Draw bright ODM gas motion ribbon visible even at 1,000+ m distance
+      for (let ti = 1; ti < this.leviTrail.length; ti++) {
+        const p0 = this.leviTrail[ti - 1];
+        const p1 = this.leviTrail[ti];
+        if (!eng.proj(p0.x, p0.y, p0.z)) continue;
+        const x0 = eng.P.x;
+        const y0 = eng.P.y;
+        if (!eng.proj(p1.x, p1.y, p1.z)) continue;
+        const k = ti / this.leviTrail.length;
+        this.lines
+          .moveTo(x0, y0)
+          .lineTo(eng.P.x, eng.P.y)
+          .stroke({ width: Math.max(1.2, 4.2 * U * k), color: 0xe8f6ff, alpha: 0.55 * k * fogAlpha(eng.P.dz) });
+      }
+    } else if (this.leviTrail.length) {
+      this.leviTrail.length = 0;
+    }
+
     if (levi.active && !levi.hidden && eng.proj(levi.x, levi.y, levi.z)) {
       const lx = eng.P.x;
       const ly = eng.P.y;
       const ls = eng.P.s;
       const dz = eng.P.dz;
-      const s = this.put('levi', lx, ly, Math.max(6 * U, 1.95 * ls) / 180, -dz + 0.2);
+      const spinning =
+        levi.phase === 'fly' ||
+        levi.phase === 'final' ||
+        (levi.phase === 'cut' && (eng.monkey.t < 2.05 || (eng.monkey.t >= 7.45 && eng.monkey.t < 9.1)));
+      const texName = spinning && ART.tex.leviSpin ? 'leviSpin' : 'levi';
+      const sprW = ART.meta[texName]?.wPx || 200;
+      const s = this.put(texName, lx, ly, Math.max(8 * U, 2.35 * ls) / sprW, -dz + 0.2);
       s.rotation =
-        levi.phase === 'fly' || levi.phase === 'final'
-          ? G.t * 7
+        spinning
+          ? G.t * 14
           : levi.phase === 'cut'
-            ? G.t * 12
+            ? Math.sin(G.t * 9) * 0.35
             : 0;
       s.tint = fogTint(dz);
       s.alpha = fogAlpha(dz);
@@ -1196,14 +1288,14 @@ export class WorldRenderer {
         if (tt) tgt = [tt.x, tt.h * 0.85, tt.z];
       } else if (levi.phase === 'final') {
         tgt = [-6, 16, G.demonZ];
-      } else if (levi.phase === 'cut' && eng.monkey.t < 7.4) {
-        tgt = [rand(-4, 4), rand(6, 16), G.demonZ - 1];
+      } else if (levi.phase === 'cut' && eng.monkey.t < 9.1) {
+        tgt = [eng.monkey.t > 6.2 ? 11.5 : rand(-4, 4), eng.monkey.t > 6.2 ? 2.5 : rand(4, 17), G.demonZ - 1];
       }
       if (tgt && eng.proj(tgt[0], tgt[1], tgt[2])) {
         this.lines
           .moveTo(lx, ly)
           .lineTo(eng.P.x, eng.P.y)
-          .stroke({ width: Math.max(1, U), color: 0x262626, alpha: 0.58 * fogAlpha(dz) });
+          .stroke({ width: Math.max(1.2, 1.4 * U), color: 0x222830, alpha: 0.65 * fogAlpha(dz) });
       }
     }
 

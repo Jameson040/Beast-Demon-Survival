@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240">
+  <defs>
+    <radialGradient id="vortexGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="25%" stop-color="#ffffff" stop-opacity="0.1"/>
+      <stop offset="65%" stop-color="#c8ecff" stop-opacity="0.55"/>
+      <stop offset="90%" stop-color="#ffffff" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <!-- High-speed spinning blade-ring vortex -->
+  <circle cx="120" cy="120" r="106" fill="url(#vortexGlow)"/>
+  <path d="M24 114 A96 96 0 0 1 194 52" fill="none" stroke="#ffffff" stroke-width="9" stroke-linecap="round"/>
+  <path d="M216 126 A96 96 0 0 1 46 188" fill="none" stroke="#e4f4ff" stroke-width="9" stroke-linecap="round"/>
+  <path d="M52 54 A78 78 0 0 1 200 116" fill="none" stroke="#8fd4ff" stroke-width="4" stroke-linecap="round" opacity="0.8"/>
+  <path d="M188 186 A78 78 0 0 1 40 124" fill="none" stroke="#8fd4ff" stroke-width="4" stroke-linecap="round" opacity="0.8"/>
+  <!-- Swirling green cloak core -->
+  <path d="M74 102 Q120 74 166 102 Q154 154 120 162 Q86 154 74 102 Z" fill="#2e703d" stroke="#16381e" stroke-width="4"/>
+  <circle cx="120" cy="112" r="16" fill="#181518"/>
+  <!-- Crossed razor blades -->
+  <path d="M104 114 L20 68 L28 60 L112 104 Z" fill="#ffffff"/>
+  <path d="M136 114 L220 160 L212 168 L128 124 Z" fill="#ffffff"/>
+</svg>

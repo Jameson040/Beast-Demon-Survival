@@ -170,9 +170,34 @@ export function updateShrapnel(eng: GameEngine, dt: number): void {
         s.wy = (s.wy ?? 0) * 0.5 + rand(-4, 4);
         s.bounces = (s.bounces ?? 0) + 1;
         const ndz = s.z - cam.z;
-        if (ndz > 0 && ndz < 350) {
-          spray(eng, s.x, 0.1, s.z, s.vx * 0.05, s.vz * 0.05, rad > 0.06 ? 5 : 2, rad > 0.06 ? 0.55 : 0.3);
-          if (vn > 2.2) {
+        if (ndz > 0 && ndz < 420) {
+          const heavy = vn > 2.2;
+          spray(
+            eng,
+            s.x,
+            0.1,
+            s.z,
+            s.vx * 0.05,
+            s.vz * 0.05,
+            heavy ? (rad > 0.05 ? 7 : 4) : rad > 0.06 ? 5 : 2,
+            heavy ? (rad > 0.05 ? 1.15 : 0.82) : rad > 0.06 ? 0.55 : 0.3
+          );
+          if (heavy) {
+            for (let cl = 0; cl < 2 && eng.parts.length < 1400; cl++) {
+              eng.parts.push({
+                x: s.x + rand(-0.35, 0.35),
+                y: 0.12,
+                z: s.z + rand(-0.35, 0.35),
+                vx: rand(-2.2, 2.2),
+                vy: rand(1.6, 4.4),
+                vz: rand(-1.8, 1.8),
+                life: 0,
+                max: rand(0.7, 1.3),
+                size: rand(0.16, 0.34),
+                col: [88, 72, 52],
+                g: 1,
+              });
+            }
             addScar(eng, {
               x: s.x,
               z: s.z,
@@ -184,7 +209,7 @@ export function updateShrapnel(eng: GameEngine, dt: number): void {
             });
           }
         }
-        if (ndz > 0 && ndz < 40 && eng.G.thudBudget-- > 0) sThud((s.x - cam.x) / 20, 0.25 * (1 - ndz / 40));
+        if (ndz > 0 && ndz < 60 && eng.G.thudBudget-- > 0) sThud((s.x - cam.x) / 22, 0.3 * (1 - ndz / 60));
       } else {
         s.vy = 0;
         const vt = Math.hypot(s.vx, s.vz);
@@ -319,13 +344,34 @@ export function updateShrapnel(eng: GameEngine, dt: number): void {
         if (Math.abs(rider.x - s.x) < 0.42 + rad) {
           rider.alive = false;
           rider.tdir = s.vx > 0 ? 1 : -1;
-          rider.tumble = 0;
+          eng.launchFallenRider(rider, s.vx, s.vz, 0.9);
           dead = true;
           const ndz = rider.z - cam.z;
-          if (ndz < 400) spray(eng, rider.x, rider.y + 0.6, rider.z, 0, rider.speed * 0.4, 10, 0.6);
+          if (ndz < 400) {
+            spray(eng, rider.x, rider.y + 0.6, rider.z, 0, rider.speed * 0.4, 10, 0.6);
+            eng.sprayBlood(
+              rider.x,
+              rider.y + 1.2,
+              rider.z,
+              s.vx * 0.12,
+              s.vy * 0.08 + 2.2,
+              s.vz * 0.12 + rider.speed * 0.4,
+              18
+            );
+          }
           if (ndz < 60) {
             sThud((rider.x - cam.x) / 25, 0.5);
             eng.G.pops.push({ text: 'Rider down', t: 0, wx: rider.x, wz: rider.z });
+          }
+          // Nearby riders flinch and spur away from the fallen scout
+          for (const other of eng.riders) {
+            if (!other.alive) continue;
+            const dx = other.x - rider.x;
+            const dz = other.z - rider.z;
+            if (Math.abs(dx) < 10 && Math.abs(dz) < 14) {
+              other.speed = Math.min(20, other.speed + 1.2);
+              other.stumble = Math.max(other.stumble, 0.22);
+            }
           }
           break;
         }

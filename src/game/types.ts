@@ -44,9 +44,9 @@ export interface DiffConfig {
 }
 
 export const DIFFS: Record<DiffKey, DiffConfig> = {
-  easy: { name: 'Recruit', frag: 0.6, acc: 1.35, rate: 1.25, targetP: 0.30, carry: 1, rockDensity: 0.72 },
-  normal: { name: 'Scout', frag: 1.0, acc: 1.0, rate: 1.0, targetP: 0.45, carry: 2, rockDensity: 1.0 },
-  hard: { name: 'Veteran', frag: 1.5, acc: 0.78, rate: 0.82, targetP: 0.60, carry: 2, rockDensity: 1.28 },
+  easy: { name: 'Recruit', frag: 0.6, acc: 1.35, rate: 1.25, targetP: 0.30, carry: 1, rockDensity: 0.864 },
+  normal: { name: 'Scout', frag: 1.0, acc: 1.0, rate: 1.0, targetP: 0.45, carry: 2, rockDensity: 1.2 },
+  hard: { name: 'Veteran', frag: 1.5, acc: 0.78, rate: 0.82, targetP: 0.60, carry: 2, rockDensity: 1.536 },
 };
 
 export const rand = (a: number, b: number) => a + Math.random() * (b - a);
@@ -114,6 +114,17 @@ export interface RiderEntity {
   yawS?: number;
   stumble: number;
   isPlayer?: boolean;
+  // Thrown-rider death kinematics (independent from horse)
+  rx?: number;
+  ry?: number;
+  rz?: number;
+  rvx?: number;
+  rvy?: number;
+  rvz?: number;
+  rrot?: number;
+  rlanded?: boolean;
+  hlanded?: boolean;
+  deadSeed?: number;
   // Player-specific
   stam?: number;
   jumpCD?: number;
@@ -165,7 +176,7 @@ export interface Scar {
   x: number;
   z: number;
   r: number;
-  kind: 0 | 1;
+  kind: 0 | 1 | 2; // 0=crater, 1=skid, 2=blood
   ang: number;
   len: number;
   a: number;

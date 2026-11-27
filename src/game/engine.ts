@@ -36,8 +36,10 @@ import {
   WIN_DIST,
 } from './types';
 import {
+  applyAudioMix,
   audioInit,
   nz,
+  pauseMusic,
   sCrack,
   sDeath,
   sFlare,
@@ -46,8 +48,13 @@ import {
   sJump,
   sRockClip,
   sRockCrash,
+  sScream,
+  sThrowBoom,
   sVault,
+  startMusic,
+  switchToCounterattack,
   tone,
+  updateHoovesMix,
 } from './audio';
 import { launchVelocity, stoneDrag, updateShrapnel } from './shrapnel';
 import { burstAt, emitAlongPath, prunePuffs } from './smoke';
@@ -113,6 +120,7 @@ export interface GameState {
   zekeDone?: boolean;
   zekeDoneT: number;
   flareStage: number;
+  screamStage: number;
 }
 
 const SKINS: [number, number, number][] = [
@@ -150,9 +158,9 @@ export class GameEngine {
   levi!: LeviState;
   chunks: ChunkEntity[] = [];
 
-  // Visual options chosen on the menu. 'classic' is the original art and stays the default.
-  horseStyle: EntityStyle = 'classic';
-  riderStyle: EntityStyle = 'classic';
+  // Rigged 3D horse and rider are the sole active style.
+  horseStyle: EntityStyle = 'rigged';
+  riderStyle: EntityStyle = 'rigged';
 
   keys: Record<string, boolean> = {};
   touch = { l: false, r: false, up: false };
@@ -225,26 +233,31 @@ export class GameEngine {
   startGame(): void {
     audioInit();
     this.newGame();
+    startMusic(true);
     this.emitState();
   }
 
   goToMenu(): void {
     this.G.state = 'menu';
+    pauseMusic();
     this.emitState();
   }
 
   togglePause(): void {
     if (this.G.state === 'play') {
       this.G.state = 'pause';
+      pauseMusic();
       this.emitState();
     } else if (this.G.state === 'pause') {
       this.G.state = 'play';
+      startMusic(false);
       this.emitState();
     }
   }
 
   toggleMute(): boolean {
     SFX.on = !SFX.on;
+    applyAudioMix();
     return SFX.on;
   }
 
@@ -253,8 +266,25 @@ export class GameEngine {
     return this.G.radar;
   }
 
+  private regimentInfo(): { alive: number; dist: number } {
+    let alive = 0;
+    let sumZ = 0;
+    for (let i = 0; i < this.riders.length; i++) {
+      const r = this.riders[i];
+      if (r.alive) {
+        alive++;
+        sumZ += r.z;
+      }
+    }
+    const dist = this.player.alive || alive === 0 ? 0 : Math.max(0, sumZ / alive - this.cam.z);
+    return { alive, dist };
+  }
+
   syncAudio(): void {
-    if (this.G.state !== 'play' || !SFX.on) {
+    const { alive, dist } = this.regimentInfo();
+    const playing = this.G.state === 'play';
+    updateHoovesMix(alive, this.riders.length, this.player.alive, this.player.speed, playing, dist);
+    if (!playing || !SFX.on) {
       if (SFX.rumble) SFX.rumble.gain.value = 0;
       if (SFX.wind) SFX.wind.gain.value = 0;
     }
@@ -293,6 +323,7 @@ export class GameEngine {
       zekeDone: false,
       zekeDoneT: 0,
       flareStage: 0,
+      screamStage: 0,
     };
 
     this.player = {
@@ -483,7 +514,7 @@ export class GameEngine {
         for (let k = this.rocks.length - 1; k >= 0; k--) {
           const o = this.rocks[k];
           if (Math.abs(o.z - rzPos) > 20) continue;
-          if (Math.hypot(o.x - x, o.z - rzPos) < 11.5) {
+          if (Math.hypot(o.x - x, o.z - rzPos) < 10.0) {
             tooClose = true;
             break;
           }
@@ -525,9 +556,11 @@ export class GameEngine {
     this.G.rockZ = z1;
   }
 
-  /* ---------------- SIGNAL FLARES ---------------- */
-  /** Three salvos, spaced across the whole 1,500 m charge, not bunched at the start. */
-  private static readonly FLARE_MARKS = [220, 740, 1220];
+  /* ---------------- SIGNAL FLARES & SCOUT WAR CRIES ---------------- */
+  /** Three salvos fired at 10 s, 20 s, and 35 s by all Scouts still alive and riding. */
+  private static readonly FLARE_TIMES = [10, 20, 35];
+  /** Battle screams trigger right before each flare salvo (three times total). */
+  private static readonly SCREAM_TIMES = [7.5, 17.5, 32.5];
   private static readonly SMOKE: [number, number, number] = [30, 220, 85];
 
   /** Every living rider fires together; canisters scatter over a 100 m radius around the Beast. */
@@ -567,14 +600,22 @@ export class GameEngine {
     };
     if (this.player.alive) shoot(this.player.x, this.player.z);
     for (const r of this.riders) if (r.alive) shoot(r.x, r.z);
+    if (index === 0) return;
     sFlare(0);
     this.G.caption = 'GREEN SMOKE — THE BEAST IS BLINDED';
     this.G.pops.push({ text: 'Signal flare!', t: -0.4, x: this.view.W / 2, y: this.view.H * 0.28, col: 'rgba(120,230,150,' });
   }
 
   private updateFlares(dt: number): void {
-    const mark = GameEngine.FLARE_MARKS[this.G.flareStage];
-    if (mark !== undefined && this.player.z >= mark && this.player.alive) {
+    const sMark = GameEngine.SCREAM_TIMES[this.G.screamStage];
+    if (sMark !== undefined && this.G.t >= sMark) {
+      this.G.screamStage++;
+      const { alive, dist } = this.regimentInfo();
+      const aliveTotal = (this.player.alive ? 1 : 0) + alive;
+      if (aliveTotal > 0) sScream(aliveTotal / (this.riders.length + 1), dist);
+    }
+    const tMark = GameEngine.FLARE_TIMES[this.G.flareStage];
+    if (tMark !== undefined && this.G.t >= tMark) {
       this.G.flareStage++;
       this.fireSignalSalvo();
     }
@@ -615,28 +656,39 @@ export class GameEngine {
       this.updateCut(dt);
       return;
     }
-    const rm = this.cfg.rate * (0.6 + 0.4 * (1 - this.closeness())) * (this.player.alive ? 1 : 0.5);
+    const rm = this.cfg.rate * (0.6 + 0.4 * (1 - this.closeness()));
     m.t += dt;
     let tL: [number, number] = [0.15 + Math.sin(this.G.t * 1.1) * 0.06, 0.05];
     let tR: [number, number] = [0.15 + Math.sin(this.G.t * 1.1 + 1) * 0.06, 0.05];
-    const thr = m.arm;
     const setT = (side: number, v: [number, number]) => {
       if (side > 0) tR = v;
       else tL = v;
     };
 
+    const hasTargets = this.player.alive || this.riders.some(r => r.alive);
+
     switch (m.state) {
       case 'idle':
+        if (!hasTargets) {
+          this.G.caption = 'All riders have fallen...';
+          break;
+        }
         this.G.caption = m.stock > 0 ? '' : 'The Beast waits for boulders...';
-        if (m.stock > 0 && m.t > 0.3 * rm) {
+        if (m.stock > 0 && m.t > 1.6 * rm) {
           m.state = 'pick';
           m.t = 0;
         }
         break;
       case 'pick':
+        if (!hasTargets) {
+          m.holding = false;
+          m.state = 'idle';
+          m.t = 0;
+          break;
+        }
         this.G.caption = 'The Beast grabs a boulder';
-        setT(1, [0.55, 0.35]);
-        if (m.t > 0.7 * rm) {
+        setT(-1, [0.55, 0.35]);
+        if (m.t > 1.1 * rm) {
           m.stock--;
           m.holding = true;
           m.state = 'crush';
@@ -647,7 +699,7 @@ export class GameEngine {
         this.G.caption = 'CRUSHING';
         tL = [0.6, -2.0];
         tR = [0.6, -2.0];
-        if (m.t > 0.3 && m.holding) {
+        if (m.t > 0.55 && m.holding) {
           m.holding = false;
           const dz = this.G.demonZ - 1.5;
           for (let i = 0; i < 60; i++) {
@@ -683,18 +735,18 @@ export class GameEngine {
           sCrack(Math.min((this.G.demonZ - this.player.z) / 343, 4));
           this.G.shake = Math.max(this.G.shake, 0.15 * this.closeness() + 0.03);
           m.handfuls = 3;
-          m.arm = Math.random() < 0.5 ? 1 : -1;
+          m.arm = -1;
         }
-        if (m.t > 0.8 * rm) {
+        if (m.t > 1.25 * rm) {
           m.state = 'windup';
           m.t = 0;
         }
         break;
       case 'windup':
         this.G.caption = 'WINDING UP';
-        setT(thr, [2.6, 0.45]);
-        setT(-thr, [0.5, -1.2]);
-        if (m.t > 0.55 * rm) {
+        setT(-1, [1.85, 0.55]);
+        setT(1, [0.45, -1.4]);
+        if (m.t > 0.95 * rm) {
           m.state = 'throw';
           m.t = 0;
           m.thrown = false;
@@ -702,22 +754,21 @@ export class GameEngine {
         break;
       case 'throw': {
         this.G.caption = 'THROWING';
-        const k = clamp(m.t / 0.22, 0, 1);
-        const a = lerp(2.6, -0.35, k);
-        const b = lerp(0.45, -0.25, k);
-        if (thr > 0) {
-          m.aR = a;
-          m.bR = b;
-        } else {
-          m.aL = a;
-          m.bL = b;
-        }
-        setT(thr, [a, b]);
-        setT(-thr, [0.5, -1.2]);
+        const k = clamp(m.t / 0.24, 0, 1);
+        const a = lerp(1.85, -0.75, k);
+        const b = lerp(0.55, -0.15, k);
+        m.aL = a;
+        m.bL = b;
+        setT(-1, [a, b]);
+        setT(1, [0.45, -1.4]);
         if (!m.thrown && k > 0.42) {
           m.thrown = true;
-          const h = this.armHand(thr, a, b);
+          const h = this.armHand(-1, a, b);
           this.volley(h[2], h[3], this.G.demonZ - 1.5);
+          sThrowBoom(
+            Math.min((this.G.demonZ - this.player.z) / 343, 4.5),
+            0.75 + 0.25 * this.closeness()
+          );
           m.handfuls--;
         }
         if (m.t > 0.3) {
@@ -727,14 +778,15 @@ export class GameEngine {
         break;
       }
       case 'recover':
-        setT(thr, [0.3, 0.1]);
-        setT(-thr, [0.5, -1.2]);
-        if (m.t > 0.35 * rm) {
+        setT(-1, [0.45, -0.9]);
+        setT(1, [0.45, -1.4]);
+        if (m.t > 1.05 * rm) {
           m.t = 0;
-          if (m.handfuls > 0) {
-            m.arm = -m.arm;
+          if (m.handfuls > 0 && hasTargets) {
+            m.arm = -1;
             m.state = 'windup';
           } else {
+            m.handfuls = 0;
             m.state = 'idle';
           }
         }
@@ -751,13 +803,13 @@ export class GameEngine {
 
   private updateQuad(dt: number): void {
     const q = this.quad;
-    const sp = (9 + 6 * this.closeness()) * (this.player.alive ? 1 : 2);
+    const sp = 9 + 6 * this.closeness();
     q.t += dt;
     if (this.monkey.state === 'cut') {
-      if (this.monkey.t > 6.5 && !this.monkey.rescued) {
+      if (this.monkey.t > 9.4 && !this.monkey.rescued) {
         q.dir = -1;
-        q.x = lerp(q.x, 5, Math.min(1, dt * 2.4));
-        q.phase += 12 * dt;
+        q.x = lerp(q.x, 11, Math.min(1, dt * 2.8));
+        q.phase += 14 * dt;
       } else if (this.monkey.rescued) {
         q.dir = 1;
         q.x += 23 * dt;
@@ -805,40 +857,57 @@ export class GameEngine {
   private volley(hx: number, hy: number, hz: number): void {
     const dist = hz - this.player.z;
     const cl = this.closeness();
-    const n = Math.round((50 + 100 * cl) * this.cfg.frag * rand(0.8, 1.2));
+    const n = Math.round((55 + 100 * cl) * this.cfg.frag * rand(0.85, 1.2));
     const alive = this.riders.filter(r => r.alive);
     const pool = this.player.alive ? alive.concat([this.player]) : alive;
     if (!pool.length) return;
-    const nt = 3 + ((Math.random() * 4) | 0);
-    const tgts: RiderEntity[] = [];
-    if (this.player.alive && Math.random() < this.cfg.targetP + 0.3 * cl) tgts.push(this.player);
-    while (tgts.length < nt) tgts.push(pool[(Math.random() * pool.length) | 0]);
-    const sigma = (3.0 + dist * 0.012) * this.cfg.acc * (this.player.alive ? 1 : 0.45);
-    const baseVh = rand(80, 105);
+
+    // Sort living targets left-to-right so the sweep follows actual rider positions across X and Z
+    const sorted = pool.slice().sort((a, b) => a.x - b.x);
+    const count = sorted.length;
+    // As fewer Scouts remain, Beast focuses his sweep tightly onto their clusters instead of empty grass
+    const focusK = clamp(count / 32, 0, 1);
+    const minX = sorted[0].x - lerp(2.5, 6, focusK);
+    const maxX = sorted[count - 1].x + lerp(2.5, 6, focusK);
+
+    const aimAtPlayer = this.player.alive && Math.random() < this.cfg.targetP + 0.3 * cl;
+    const baseSigma = (3.0 + dist * 0.012) * this.cfg.acc * (this.player.alive ? 1 : 0.45);
+    const sigma = baseSigma * lerp(0.32, 1.0, focusK);
+    const zJitter = lerp(2.5, 11.0, focusK);
+    // Straight, baseball-like fastball speed (flat trajectory, not high mortar arc)
+    const baseVh = rand(205, 250);
     let minT = 1e9;
     let atPlayer = false;
+
     for (let i = 0; i < n; i++) {
-      const wide = Math.random() < (this.player.alive ? 0.3 : 0.08);
-      const tgt = tgts[i % tgts.length];
-      const cx = wide ? rand(-90, 90) - tgt.x + this.player.x * 0.3 : 0;
-      const cz = wide ? rand(-20, 170) - (tgt.z - this.player.z) : 0;
+      const u = i / Math.max(1, n - 1);
+      const isPlayerSlice = aimAtPlayer && Math.random() < 0.12;
+      const sweepTgt = sorted[Math.min(count - 1, Math.floor(u * count))];
+      const tgt = isPlayerSlice ? this.player : sweepTgt;
+      // Blend between full-width sweep and focused target X as riders thin out
+      const sweepX = lerp(tgt.x, lerp(minX, maxX, u), focusK * 0.65);
+
       const bullet = Math.random() < 0.15;
       const chunk = !bullet && Math.random() < 0.05;
-      const vh = baseVh * rand(0.88, 1.12) * (bullet ? 1.2 : chunk ? 0.9 : 1);
-      let T = Math.hypot(tgt.x - hx, tgt.z - hz) / vh;
-      const px = tgt.x + tgt.vx * T * rand(0.2, 0.9);
+      const vh = baseVh * rand(0.92, 1.08) * (bullet ? 1.15 : chunk ? 0.92 : 1);
+
+      let T = Math.hypot((isPlayerSlice ? tgt.x : sweepX) - hx, tgt.z - hz) / vh;
+      const px = isPlayerSlice
+        ? tgt.x + tgt.vx * T * rand(0.2, 0.9)
+        : sweepX + tgt.vx * T * 0.5 + gauss() * (sigma * 0.72);
       let pz = tgt.z + tgt.speed * T;
       T = Math.hypot(px - hx, pz - hz) / vh;
       pz = tgt.z + tgt.speed * T;
-      const tx = px + cx + gauss() * sigma;
-      const tz = pz + cz + gauss() * sigma * 1.2;
-      const ty = rand(0.2, 2.3);
+
+      const tx = isPlayerSlice ? px + gauss() * sigma : px;
+      const tz = pz + gauss() * sigma * 0.9 + (isPlayerSlice ? 0 : rand(-zJitter, zJitter));
+      const ty = rand(0.25, 2.25);
       const T2 = Math.hypot(tx - hx, tz - hz) / vh;
       const kd = stoneDrag(bullet, chunk);
       const lv = launchVelocity({ x: hx, y: hy, z: hz }, { x: tx, y: ty, z: tz }, T2, kd);
       const vy = lv.vy;
       const r = bullet ? rand(0.008, 0.014) : chunk ? rand(0.07, 0.14) : rand(0.02, 0.035);
-      const delay = rand(0, 0.14);
+      const delay = u * 0.18 + rand(0, 0.04);
       this.stones.push({
         x: hx + rand(-0.6, 0.6),
         y: hy + rand(-0.6, 0.6),
@@ -865,7 +934,7 @@ export class GameEngine {
         skid: 0,
         bounces: 0,
       });
-      if (tgt === this.player && !wide) {
+      if (isPlayerSlice) {
         atPlayer = true;
         if (T2 + delay < minT) minT = T2 + delay;
       }
@@ -874,11 +943,153 @@ export class GameEngine {
     if (atPlayer) this.G.warn.push({ until: this.G.t + minT, start: this.G.t });
   }
 
-  /* ---------------- COLLISION HELPERS ---------------- */
+  /* ---------------- COLLISION & DEATH HELPERS ---------------- */
+  sprayBlood(x: number, y: number, z: number, vx: number, vy: number, vz: number, count: number): void {
+    for (let i = 0; i < count && this.parts.length < 1400; i++) {
+      const dark = Math.random() < 0.45;
+      this.parts.push({
+        x: x + rand(-0.25, 0.25),
+        y: Math.max(0.15, y + rand(-0.3, 0.3)),
+        z: z + rand(-0.25, 0.25),
+        vx: vx + rand(-3.8, 3.8),
+        vy: vy + rand(1.0, 4.8),
+        vz: vz + rand(-3.0, 3.0),
+        life: 0,
+        max: rand(0.55, 1.35),
+        size: rand(0.08, 0.22),
+        col: dark ? [102, 8, 10] : [156, 14, 18],
+        g: 1,
+      });
+    }
+  }
+
+  addBloodPool(x: number, z: number, r: number): void {
+    this.scars.push({
+      x,
+      z,
+      r,
+      kind: 2,
+      ang: rand(0, 6.28),
+      len: 0,
+      a: rand(0.78, 0.96),
+    });
+    if (this.scars.length > 280) this.scars.splice(0, this.scars.length - 280);
+  }
+
+  launchFallenRider(ent: RiderEntity, impactVx: number, impactVz = 0, speedScale = 1): void {
+    const dir = ent.tdir || (Math.random() < 0.5 ? -1 : 1);
+    ent.tdir = dir;
+    ent.tumble = 0;
+    ent.rx = ent.x;
+    ent.ry = Math.max(1.35, ent.y + 1.35);
+    ent.rz = ent.z;
+    const frontalHit = impactVz < -25;
+    // Frontal supersonic stone impact knocks rider sideways & slightly back relative to the coasting horse;
+    // rock crash pitches rider forward/sideways off the halted horse with realistic inertia.
+    ent.rvx = dir * rand(3.0, 6.2) + clamp(impactVx * 0.15, -4, 4);
+    ent.rvy = frontalHit ? rand(2.8, 5.0) : rand(3.6, 5.8);
+    ent.rvz = frontalHit
+      ? ent.speed * rand(0.18, 0.42) * speedScale
+      : ent.speed * rand(0.48, 0.72) * speedScale;
+    ent.rrot = dir * rand(0.4, 1.1);
+    ent.rlanded = false;
+    ent.hlanded = false;
+    ent.deadSeed = Math.random();
+    ent.vx = -dir * rand(0.8, 2.2);
+  }
+
+  private updateFallenRider(ent: RiderEntity, dt: number): void {
+    ent.tumble += dt;
+    ent.speed = Math.max(0, ent.speed - 16 * dt);
+    ent.z += ent.speed * dt;
+    ent.vx *= Math.exp(-3.5 * dt);
+    ent.x += ent.vx * dt;
+    ent.y = Math.max(0, ent.y - 3.5 * dt);
+
+    const ndz = ent.z - this.cam.z;
+    if (!ent.hlanded && ent.tumble > 0.34) {
+      ent.hlanded = true;
+      if (ndz > -5 && ndz < 340) {
+        this.addBloodPool(ent.x + rand(-0.4, 0.4), ent.z + rand(-0.4, 0.4), rand(0.65, 1.05));
+        for (let i = 0; i < 6 && this.parts.length < 1400; i++) {
+          this.parts.push({
+            x: ent.x + rand(-0.9, 0.9),
+            y: 0.15,
+            z: ent.z + rand(-0.9, 0.9),
+            vx: rand(-2, 2),
+            vy: rand(0.4, 1.8),
+            vz: ent.speed * 0.25 + rand(-1, 1),
+            life: 0,
+            max: rand(0.7, 1.4),
+            size: rand(0.45, 0.95),
+            col: [152, 128, 96],
+            dust: 1,
+          });
+        }
+      }
+    }
+
+    if (ent.rx === undefined || ent.rz === undefined) return;
+    ent.ry = ent.ry ?? 0;
+    ent.rvx = ent.rvx ?? 0;
+    ent.rvy = ent.rvy ?? 0;
+    ent.rvz = ent.rvz ?? 0;
+    ent.rrot = ent.rrot ?? 0;
+
+    if (ent.ry > 0 || ent.rvy > 0) {
+      ent.rx += ent.rvx * dt;
+      ent.rz += ent.rvz * dt;
+      ent.rvy -= GRAV * 1.45 * dt;
+      ent.ry += ent.rvy * dt;
+      ent.rrot += ent.tdir * 7.2 * dt;
+      if (ndz > 0 && ndz < 300 && ent.ry > 0.25 && Math.random() < dt * 16) {
+        this.sprayBlood(ent.rx, ent.ry, ent.rz, ent.rvx * 0.2, 0.5, ent.rvz * 0.2, 1);
+      }
+      if (ent.ry <= 0) {
+        ent.ry = 0;
+        if (!ent.rlanded) {
+          ent.rlanded = true;
+          if (ndz > -5 && ndz < 340) {
+            this.addBloodPool(ent.rx, ent.rz, rand(0.55, 0.9));
+            this.sprayBlood(ent.rx, 0.2, ent.rz, ent.rvx * 0.25, 1.8, ent.rvz * 0.25, 8);
+          }
+        }
+        if (ent.rvy < -3.6) {
+          ent.rvy = -ent.rvy * 0.22;
+          ent.rvx *= 0.6;
+          ent.rvz *= 0.6;
+        } else {
+          ent.rvy = 0;
+        }
+      }
+    } else {
+      const skidDamp = Math.exp(-5.5 * dt);
+      ent.rvx *= skidDamp;
+      ent.rvz *= skidDamp;
+      ent.rx += ent.rvx * dt;
+      ent.rz += ent.rvz * dt;
+      // Wrap tumble angle into [-PI, PI] so fallen Scouts settle flat horizontally
+      const twoPi = Math.PI * 2;
+      ent.rrot = ((((ent.rrot + Math.PI) % twoPi) + twoPi) % twoPi) - Math.PI;
+      const targetRot = ent.tdir * 0.08;
+      ent.rrot = lerp(ent.rrot, targetRot, Math.min(1, dt * 10));
+    }
+  }
+
   killPlayerByStone(s: StoneEntity): void {
     if (!this.player.alive || this.godMode) return;
     this.player.alive = false;
     this.player.tdir = s.vx > 0 ? 1 : -1;
+    this.launchFallenRider(this.player, s.vx, s.vz, 0.9);
+    this.sprayBlood(
+      this.player.x,
+      1.5,
+      this.player.z,
+      s.vx * 0.12,
+      s.vy * 0.08 + 2.2,
+      s.vz * 0.12 + this.player.speed * 0.4,
+      20
+    );
     this.G.killer = {
       type: 'stone',
       kmh: Math.hypot(s.vx, s.vy, s.vz) * 3.6,
@@ -944,7 +1155,9 @@ export class GameEngine {
       this.G.fate = r < 0.12 ? 'dead' : r < 0.48 ? 'serious' : 'light';
     }
     this.G.fallDist = this.G.demonZ - p.z;
-    p.vx = p.tdir * rand(3.5, 6.0);
+    this.launchFallenRider(p, p.tdir * 5.0, 0, 1.0);
+    this.sprayBlood(p.x, 1.2, p.z, p.tdir * 3.5, 2.8, p.speed * 0.4, 16);
+    p.vx = p.tdir * rand(2.5, 4.5);
     sRockCrash();
     this.emitState();
 
@@ -1216,12 +1429,7 @@ export class GameEngine {
       if (p.alive && p.z >= this.G.demonZ - WIN_DIST) this.winGame(false);
     } else {
       this.G.deathT += dt;
-      p.tumble += dt;
-      p.speed = Math.max(0, p.speed - 16 * dt);
-      p.z += p.speed * dt;
-      p.vx *= 0.95;
-      p.x += p.vx * dt;
-      p.y = Math.max(0, p.y - 3 * dt);
+      this.updateFallenRider(p, dt);
       if (this.G.fate === 'dead') {
         if (this.G.deathT > 2.6 && this.G.state === 'play') this.gameOver();
       } else {
@@ -1247,6 +1455,11 @@ export class GameEngine {
 
     // Update 120 Companion Riders (with smart Rock Avoidance, Dynamic Vaulting & Rock Collisions!)
     const pc = this.player.alive ? this.player : null;
+    let aliveRiders = 0;
+    for (let ri = 0; ri < this.riders.length; ri++) {
+      if (this.riders[ri].alive) aliveRiders++;
+    }
+    const tighten = lerp(0.52, 1, clamp(aliveRiders / Math.max(1, this.riders.length * 0.75), 0, 1));
     for (let ri = 0; ri < this.riders.length; ri++) {
       const r = this.riders[ri];
       if (r.alive) {
@@ -1259,7 +1472,8 @@ export class GameEngine {
           Math.min(1, dt * 2)
         );
         if (Math.random() < dt * 0.12) r.lane = clamp((r.lane || 0) + rand(-3, 3), -96, 96);
-        r.lane = (r.lane || 0) + ((r.home || 0) - (r.lane || 0)) * dt * 0.05;
+        const targetHome = (r.home || 0) * tighten;
+        r.lane = (r.lane || 0) + (targetHome - (r.lane || 0)) * dt * 0.06;
         let tx = formationLane(
           (r.lane || 0) + Math.sin(this.G.t * (r.wf || 0.3) * 1.7 + (r.ph || 0)) * 2,
           r.z
@@ -1308,9 +1522,10 @@ export class GameEngine {
                 // Direct NPC crash on rock!
                 r.alive = false;
                 r.tdir = dx >= 0 ? 1 : -1;
-                r.tumble = 0;
+                this.launchFallenRider(r, r.tdir * 4.5, 0, 1.0);
                 const ndz = r.z - this.cam.z;
                 if (ndz > 0 && ndz < 350 && this.parts.length < 1400) {
+                  this.sprayBlood(r.x, 1.1, r.z, r.tdir * 3, 2.5, r.speed * 0.4, 14);
                   for (let q = 0; q < 12; q++) {
                     this.parts.push({
                       x: r.x + rand(-0.6, 0.6),
@@ -1387,11 +1602,7 @@ export class GameEngine {
           r.speed = 0;
         }
       } else {
-        r.tumble += dt;
-        r.speed = Math.max(0, r.speed - 18 * dt);
-        r.z += r.speed * dt;
-        r.vx *= 0.9;
-        r.y = Math.max(0, r.y - 3 * dt);
+        this.updateFallenRider(r, dt);
       }
     }
 
@@ -1455,23 +1666,30 @@ export class GameEngine {
     this.cam.x = lerp(this.cam.x, tx, Math.min(1, dt * 5));
     const intro = clamp(this.G.t / 2.8, 0, 1);
     const followDistance = lerp(SCENE.cameraStartOffset, SCENE.cameraRideOffset, intro * intro * (3 - 2 * intro));
-    this.cam.z = p.z - followDistance + (p.alive ? 0 : Math.min(this.G.deathT * 2, 3));
+    this.cam.z = p.z - followDistance;
     this.cam.y =
       3.6 +
       p.y * 0.4 +
-      (p.alive ? Math.sin(p.phase * 2) * 0.03 : Math.min(this.G.deathT, 1.5));
+      (p.alive ? Math.sin(p.phase * 2) * 0.03 : 0);
 
     if (!p.alive && this.G.fate !== 'dead') {
-      const k = clamp((this.G.deathT - 1.4) / 1.6, 0, 1);
+      const k = clamp((this.G.deathT - 0.5) / 1.4, 0, 1);
       const e = k * k * (3 - 2 * k);
-      this.cam.x = lerp(this.cam.x, p.x, e);
-      this.cam.z = lerp(this.cam.z, p.z + 0.6, e);
-      this.cam.y = lerp(this.cam.y, 0.75 + Math.sin(this.G.t * 1.3) * 0.03, e);
-      let zt = 1;
-      if (this.G.fate === 'light' && (this.levi.phase === 'final' || this.levi.phase === 'cut')) {
-        zt = clamp((this.G.demonZ - p.z) / 260, 1, 4.5);
+      const breath = Math.sin(this.G.t * 1.45);
+      const beat = Math.pow(
+        Math.max(0, Math.sin(this.G.t * (this.G.fate === 'serious' ? 3.8 : 2.4))),
+        6
+      );
+      this.cam.x = lerp(this.cam.x, (p.rx ?? p.x) + Math.sin(this.G.t * 0.7) * 0.08, e);
+      this.cam.z = lerp(this.cam.z, (p.rz ?? p.z) + 0.6, e);
+      this.cam.y = lerp(this.cam.y, Math.max(0.75, (p.ry ?? 0) + 0.65) + breath * 0.035 + beat * 0.015, e);
+      const tiltTarget = p.tdir * (this.G.fate === 'serious' ? 0.07 : 0.03) + breath * 0.008;
+      this.cam.rot = lerp(this.cam.rot || 0, tiltTarget * e, Math.min(1, dt * 3));
+      let zt = this.G.fate === 'serious' ? 1 + beat * 0.025 : 1;
+      if (this.levi.phase === 'final' || this.levi.phase === 'cut') {
+        zt = clamp((this.G.demonZ - p.z) / 240, 1.6, 4.4);
       }
-      this.G.zoom = lerp(this.G.zoom || 1, zt, Math.min(1, dt * 0.8));
+      this.G.zoom = lerp(this.G.zoom || 1, zt, Math.min(1, dt * 1.4));
     } else {
       this.G.zoom = 1;
     }
@@ -1512,7 +1730,9 @@ export class GameEngine {
       }
       this.G.smokeEngulf = lerp(this.G.smokeEngulf || 0, clamp(smokeDensity, 0, 1), Math.min(1, dt * 6));
     } else {
-      this.cam.rot = lerp(this.cam.rot || 0, 0, Math.min(1, dt * 4));
+      if (this.G.fate === 'dead') {
+        this.cam.rot = lerp(this.cam.rot || 0, 0, Math.min(1, dt * 4));
+      }
       this.G.smokeEngulf = 0;
     }
 
@@ -1648,7 +1868,7 @@ export class GameEngine {
       return;
     }
     if (L.hidden || L.phase === 'cut') return;
-    L.t += this.player.alive ? dt : dt * 1.5;
+    L.t += dt;
     if (L.phase === 'fly' || L.phase === 'final') {
       const k = clamp(L.t / L.dur, 0, 1);
       const e = k * k * (3 - 2 * k);
@@ -1715,16 +1935,19 @@ export class GameEngine {
       L.x = tt.x;
       L.z = tt.z;
       L.y = tt.h * 0.9;
-      const ridersLeft = this.riders.some(r => r.alive);
+      let aliveCount = 0;
+      for (const r of this.riders) if (r.alive) aliveCount++;
+      const ridersLeft = aliveCount > 0;
       if (L.idx >= L.order.length && !this.player.alive && ridersLeft) {
         L.wait = (L.wait || 0) + dt;
         L.killT = (L.killT || 0) - dt;
-        if (L.wait > 5 && L.killT <= 0) {
+        if (L.wait > 6 && L.killT <= 0) {
           L.killT = 0.45;
           const al = this.riders.filter(r => r.alive);
           const r = al[(Math.random() * al.length) | 0];
           r.alive = false;
-          r.tumble = 0;
+          this.launchFallenRider(r, rand(-4, 4), -200, 0.85);
+          this.sprayBlood(r.x, 1.4, r.z, rand(-3, 3), 2.2, r.speed * 0.3, 12);
           for (let q = 0; q < 10; q++) {
             this.parts.push({
               x: r.x + rand(-0.5, 0.5),
@@ -1741,20 +1964,29 @@ export class GameEngine {
             });
           }
         }
-      } else if (L.t > 3.2) {
-        if (L.idx < L.order.length) {
-          L.phase = 'fly';
-          this.setLeviHop();
-        } else {
-          L.phase = 'final';
-          L.t = 0;
-          L.sx = L.x;
-          L.sy = L.y;
-          L.sz = L.z;
-          L.fx = -6;
-          L.fy = 16;
-          L.fz = this.G.demonZ + 2;
-          L.dur = 2.4;
+      } else {
+        const rem = Math.max(0, L.order.length - L.idx);
+        const timeLeft = Math.max(1.5, 58 - this.G.t);
+        const stepBudget = (timeLeft - 1.8) / Math.max(1, rem + 0.5);
+        const perchDur = L.idx >= L.order.length
+          ? clamp(timeLeft - 1.8, 0.35, 1.8)
+          : clamp(stepBudget * 0.45, 0.45, 2.4);
+        if (L.t > perchDur) {
+          if (L.idx < L.order.length) {
+            L.phase = 'fly';
+            this.setLeviHop();
+          } else {
+            L.phase = 'final';
+            L.t = 0;
+            L.sx = L.x;
+            L.sy = L.y;
+            L.sz = L.z;
+            L.fx = -6;
+            L.fy = 16;
+            L.fz = this.G.demonZ + 2;
+            L.dur = clamp(58 - this.G.t, 1.0, 2.0);
+            switchToCounterattack();
+          }
         }
       }
     }
@@ -1771,11 +2003,16 @@ export class GameEngine {
     L.fx = tt.x;
     L.fy = tt.h * 0.86;
     L.fz = tt.z + 0.8;
-    L.dur = clamp(Math.hypot(L.fx - L.sx, L.fz - L.sz) / 22, 1.2, 4);
+    const rem = Math.max(1, L.order.length - L.idx);
+    const timeLeft = Math.max(2.0, 58 - this.G.t);
+    const stepBudget = (timeLeft - 1.8) / (rem + 0.5);
+    const baseDur = Math.hypot(L.fx - L.sx, L.fz - L.sz) / 30;
+    L.dur = clamp(Math.min(baseDur, stepBudget * 0.55), 0.6, 2.4);
   }
 
   /* ---------------- THE BEAST IS CUT DOWN ---------------- */
   private startZekeCut(): void {
+    switchToCounterattack();
     const m = this.monkey;
     m.state = 'cut';
     m.t = 0;
@@ -1807,10 +2044,10 @@ export class GameEngine {
     fn(Math.min(Math.max(this.G.demonZ - this.player.z, 0) / 343, 4));
   }
 
-  armPoint(h: [number, number, number, number], u: number): [number, number] {
+  armPoint(h: [number, number, number, number], u: number, side = 1): [number, number] {
     if (u < 0.5) {
       const k = u / 0.5;
-      return [lerp(3.8, h[0], k), lerp(15, h[1], k)];
+      return [lerp(side * 3.8, h[0], k), lerp(15, h[1], k)];
     }
     const k = (u - 0.5) / 0.5;
     return [lerp(h[0], h[2], k), lerp(h[1], h[3], k)];
@@ -1823,57 +2060,73 @@ export class GameEngine {
     m.t += dt;
     const t = m.t;
     m.flash = Math.max(0, (m.flash || 0) - dt * 3);
-    const r = Math.min(1, dt * 4);
-    if (!m.armCut) {
-      m.aR = lerp(m.aR, 0.45, r);
-      m.bR = lerp(m.bR, 0.2, r);
+    const r = Math.min(1, dt * 7);
+
+    // 1. Right arm raised to shoulder level trying to catch Levi (0..2.0s)
+    if (!m.leftArmCut) {
+      const reach = Math.sin(t * 9) * 0.14;
+      m.aL = lerp(m.aL, 1.55 + reach, r);
+      m.bL = lerp(m.bL, -0.35 + reach * 0.5, r);
     }
-    m.aL = lerp(m.aL, m.legsCut ? 1.8 + Math.sin(t * 6) * 0.4 : 0.3, r);
-    m.bL = lerp(m.bL, m.legsCut ? 0.6 : 0.1, r);
+
+    // 2. Left arm: braces (0..2.0s), covers nape behind head (2.0..3.2s), flails blindly when eyes cut (3.2s+)
+    if (!m.armCut) {
+      if (t < 2.0) {
+        m.aR = lerp(m.aR, 0.45, r);
+        m.bR = lerp(m.bR, 0.25, r);
+      } else if (t < 3.2) {
+        m.aR = lerp(m.aR, 2.65, r);
+        m.bR = lerp(m.bR, -1.55, r);
+      } else {
+        m.aR = lerp(m.aR, 1.95 + Math.sin(t * 7.2) * 0.48, r);
+        m.bR = lerp(m.bR, -0.75 + Math.cos(t * 6.5) * 0.35, r);
+      }
+    }
     this.G.caption = '';
-    const gas = () => {
-      if (this.parts.length < 1400) {
+    const gas = (n = 1) => {
+      for (let i = 0; i < n && this.parts.length < 1400; i++) {
         this.parts.push({
-          x: L.x,
-          y: L.y,
-          z: L.z,
-          vx: rand(-0.4, 0.4),
-          vy: rand(-0.3, 0.3),
-          vz: rand(-0.4, 0.4),
+          x: L.x + rand(-0.3, 0.3),
+          y: L.y + rand(-0.3, 0.3),
+          z: L.z + rand(-0.3, 0.3),
+          vx: rand(-0.8, 0.8),
+          vy: rand(-0.4, 0.6),
+          vz: rand(-0.8, 0.8),
           life: 0,
-          max: 0.8,
-          size: 0.9,
-          col: [245, 245, 245],
+          max: 0.9,
+          size: 1.25,
+          col: [242, 248, 255],
           dust: 1,
         });
       }
     };
 
+    // Phase 1 (0..2.0s): Beast reaches out with right hand at shoulder level; Levi shreds it into pieces
     if (t < 2.0) {
-      const h = this.armHand(1, m.aR, m.bR);
-      const pt = this.armPoint(h, 1 - t / 2);
-      L.x = pt[0] + Math.cos(t * 23) * 1.8;
-      L.y = pt[1] + Math.sin(t * 23) * 0.8;
-      L.z = Z - 1.5 - Math.sin(t * 23) * 1.8;
-      gas();
-      if (Math.random() < dt * 14) m.flash = 1;
-    } else if (!m.armCut) {
-      m.armCut = true;
-      const h = this.armHand(1, m.aR, m.bR);
+      const h = this.armHand(-1, m.aL, m.bL);
+      const pt = this.armPoint(h, 1 - t / 2, -1);
+      L.x = pt[0] + Math.cos(t * 25) * 2.1;
+      L.y = pt[1] + Math.sin(t * 25) * 1.0;
+      L.z = Z - 1.5 - Math.sin(t * 25) * 2.0;
+      gas(2);
+      if (Math.random() < dt * 16) m.flash = 1;
+    } else if (!m.leftArmCut) {
+      m.leftArmCut = true;
+      const h = this.armHand(-1, m.aL, m.bL);
       for (let i = 0; i < 12; i++) {
         const u0 = i / 12;
         const u1 = (i + 1) / 12;
-        const a = this.armPoint(h, u0);
-        const b = this.armPoint(h, u1);
+        const a = this.armPoint(h, u0, -1);
+        const b = this.armPoint(h, u1, -1);
         this.chunks.push({
           x: (a[0] + b[0]) / 2,
           y: (a[1] + b[1]) / 2,
           z: Z - 1.5,
-          vx: rand(-3, 3) + 1.5,
-          vy: rand(-1, 4),
+          vx: rand(-3.5, 3.5) - 1.8,
+          vy: rand(-1, 4.5),
           vz: rand(-2.5, 2.5),
           a: Math.atan2(b[1] - a[1], b[0] - a[0]),
-          va: rand(-2.5, 2.5),
+          va: rand(-3.0, 3.0),
           len: Math.hypot(b[0] - a[0], b[1] - a[1]) * 0.95,
           th: lerp(1.9, 1.4, u0),
           hand: i === 11,
@@ -1881,179 +2134,171 @@ export class GameEngine {
           landed: false,
         });
       }
+      this.sprayBlood(h[0], h[1], Z - 1.5, -2, 2, 0, 26);
       this.zekeSound(d => {
         nz(0.5, 'highpass', 2500, 0.25, { delay: d });
         nz(0.4, 'lowpass', 900, 0.4, { delay: d + 0.1 });
       });
       this.G.pops.push({
-        text: 'His arm... in pieces!',
+        text: 'His right arm... in pieces!',
         t: -1,
         x: this.view.W / 2,
         y: this.view.H * 0.34,
       });
     }
 
+    // Phase 2 (2.0..3.2s): Sensing Levi behind, Beast covers nape with left hand -> Levi blinds his eyes!
     if (t >= 2.0 && !m.guardNape) {
       m.guardNape = true;
-      this.G.caption = 'THE BEAST GUARDS HIS NAPE';
     }
-    if (t >= 2.0 && t < 2.6) {
-      L.x = lerp(6, 1.5, (t - 2) / 0.6);
-      L.y = lerp(10, 17.5, (t - 2) / 0.6);
-      L.z = Z - 3;
-      gas();
+    if (t >= 2.0 && t < 2.85) {
+      const k = (t - 2.0) / 0.85;
+      L.x = lerp(-6, 3.2, Math.sin(k * Math.PI * 0.75));
+      L.y = lerp(15, 18.2, k);
+      L.z = lerp(Z + 3.5, Z - 3.2, k);
+      gas(2);
     }
-    if (t >= 2.6 && !m.eyesCut) {
+    if (t >= 2.85 && !m.eyesCut) {
       m.eyesCut = true;
       m.flash = 1;
-      this.G.caption = 'LEVI BLINDS THE BEAST';
       this.zekeSound(d => {
-        nz(0.3, 'highpass', 3500, 0.3, { delay: d });
+        nz(0.35, 'highpass', 3500, 0.34, { delay: d });
         tone(180, 1.4, 0.25, 'sawtooth', d, 70);
       });
-      for (let i = 0; i < 12; i++) {
-        this.parts.push({
-          x: rand(-1.2, 1.2),
-          y: 17.3,
-          z: Z - 3,
-          vx: rand(-2, 2),
-          vy: rand(-2, 2),
-          vz: rand(-1, 1),
-          life: 0,
-          max: rand(1, 2),
-          size: rand(0.5, 1),
-          col: [140, 20, 20],
-          g: 1,
-        });
-      }
+      this.sprayBlood(0, 17.3, Z - 2.5, 0, 1.5, -2, 28);
+      this.G.pops.push({
+        text: 'Levi blinds the Beast!',
+        t: -1,
+        x: this.view.W / 2,
+        y: this.view.H * 0.34,
+      });
     }
-    if (t >= 2.6 && t < 3.4) {
-      const k = (t - 2.6) / 0.8;
-      L.x = lerp(1.5, -3.4, k);
-      L.y = lerp(17.5, 4.5, k);
-      L.z = Z - 3;
-      gas();
+
+    // Phase 3 (3.2..4.25s): Blinded Beast wanders/staggers while Levi dives to cut his Achilles heels
+    if (t >= 2.85 && t < 4.25) {
+      const k = (t - 2.85) / 1.4;
+      L.x = lerp(3.2, -3.8, k) + Math.sin(k * Math.PI) * 2.5;
+      L.y = lerp(18.0, 2.0, k * k);
+      L.z = Z - 3.0;
+      gas(2);
     }
-    if (t >= 3.4 && !m.legsCut) {
+    if (t >= 4.25 && !m.legsCut) {
       m.legsCut = true;
-      m.leftArmCut = true;
       m.flash = 1;
-      this.G.caption = 'LEVI CUTS THE LEGS AND REMAINING ARM';
-      this.zekeSound(d => nz(0.4, 'highpass', 2500, 0.25, { delay: d }));
+      this.zekeSound(d => nz(0.45, 'highpass', 2500, 0.3, { delay: d }));
+      this.sprayBlood(-3.2, 2.0, Z - 1, -2, 3, -1, 18);
+      this.sprayBlood(3.2, 2.0, Z - 1, 2, 3, -1, 18);
       for (const sd of [-1, 1]) {
         this.chunks.push({
-          x: sd * 3.6, y: 4.2, z: Z - 1, vx: sd * 5, vy: 3.5, vz: -1,
-          a: sd * 0.5, va: sd * 2, len: 3.4, th: 2.5, hand: false, steamT: 0, landed: false,
+          x: sd * 3.4, y: 2.2, z: Z - 1, vx: sd * 4.5, vy: 3.2, vz: -1,
+          a: sd * 0.5, va: sd * 2, len: 2.8, th: 2.3, hand: false, steamT: 0, landed: false,
         });
-        for (let i = 0; i < 10; i++) {
-          this.parts.push({
-            x: sd * 3.5,
-            y: 4.4,
-            z: Z - 1,
-            vx: rand(-2, 2),
-            vy: rand(0, 3),
-            vz: rand(-1, 1),
-            life: 0,
-            max: rand(2, 3),
-            size: rand(2, 3.5),
-            col: [240, 238, 232],
-            dust: 1,
-          });
-        }
       }
     }
-    if (m.legsCut) m.drop = clamp((t - 3.4) / 0.7, 0, 1);
-    if (t > 3.4 && t < 7.4) {
-      L.x = lerp(L.x, -2, dt * 2);
-      L.y = lerp(L.y, 14 + Math.sin(t * 3) * 2, dt * 2);
-      L.z = Z - 6;
-      gas();
-    }
-    if (t > 4.2) {
-      const k = clamp((t - 4.2) / 1.9, 0, 1);
+
+    // Phase 4 (4.25..6.25s): Beast collapses face-first / head-down onto the ground
+    if (m.legsCut) m.drop = clamp((t - 4.25) / 0.8, 0, 1);
+    if (t >= 4.5 && t <= 6.25) {
+      const k = clamp((t - 4.5) / 1.75, 0, 1);
       m.tip = k * k;
       if (k >= 1 && !m.landed) {
         m.landed = true;
-        this.G.shake = Math.max(this.G.shake, 0.5 * this.closeness() + 0.1);
+        this.G.shake = Math.max(this.G.shake, 0.65 * this.closeness() + 0.18);
         this.zekeSound(d => {
-          nz(1.6, 'lowpass', 400, 0.9, { delay: d, f2: 30 });
-          tone(32, 1.8, 0.6, 'sine', d, 18);
+          nz(1.6, 'lowpass', 400, 0.95, { delay: d, f2: 30 });
+          tone(32, 1.8, 0.65, 'sine', d, 18);
         });
-        for (let i = 0; i < 50; i++) {
+        for (let i = 0; i < 60; i++) {
           this.parts.push({
-            x: rand(-2, 22),
+            x: rand(-2, 18),
             y: rand(0, 3),
             z: Z + rand(-6, 6),
-            vx: rand(-5, 5),
-            vy: rand(0.5, 4),
+            vx: rand(-6, 6),
+            vy: rand(0.8, 4.8),
             vz: rand(-4, 4),
             life: 0,
-            max: rand(3, 5),
-            size: rand(4, 8),
+            max: rand(2.5, 4.8),
+            size: rand(3.5, 7.5),
             col: [175, 155, 120],
             dust: 1,
           });
         }
       }
     }
-    if (t >= 6.25 && !m.napeCut) {
-      m.napeCut = true;
-      m.flash = 1;
-      this.G.caption = 'THE NAPE IS OPEN';
-      this.zekeSound(d => {
-        nz(0.35, 'highpass', 3400, 0.34, { delay: d });
-        tone(330, 0.28, 0.18, 'triangle', d, 110);
-      });
-      for (let i = 0; i < 20; i++) this.parts.push({
-        x: rand(-1.2, 1.2), y: rand(15, 18), z: Z + rand(-2, 1),
-        vx: rand(-3, 3), vy: rand(-1, 4), vz: rand(-2, 2),
-        life: 0, max: rand(1, 2.5), size: rand(0.6, 1.6), col: [190, 56, 44],
-      });
+
+    // Phase 5 (6.25..11.2s): Levi surges skyward, dives onto the fallen nape, hacks Zeke out, then 2.6s beat before Cart Titan rescues him!
+    if (t >= 6.25 && t < 7.0) {
+      const k = (t - 6.25) / 0.75;
+      L.x = lerp(-3.5, 10.8, k);
+      L.y = lerp(2.5, 24.5, Math.sin(k * Math.PI * 0.5));
+      L.z = Z - 2.0;
+      gas(2);
+    } else if (t >= 7.0 && t < 7.45) {
+      const k = (t - 7.0) / 0.45;
+      L.x = lerp(10.8, 11.4, k);
+      L.y = lerp(24.5, 2.5, k * k);
+      L.z = Z - 2.0;
+      gas(2);
+    } else if (t >= 7.45 && t < 9.1) {
+      L.x = 11.4 + Math.cos(t * 34) * 1.8;
+      L.y = 2.4 + Math.sin(t * 28) * 1.1;
+      L.z = Z - 2.2;
+      gas(2);
+      if (Math.random() < dt * 18) {
+        m.flash = 1;
+        this.sprayBlood(11.4, 2.4, Z - 1.5, rand(-2, 2), rand(2, 5), rand(-2, 2), 4);
+      }
+      if (Math.random() < dt * 6) {
+        this.zekeSound(d => nz(0.14, 'highpass', 3200, 0.24, { delay: d }));
+      }
+    } else if (t >= 9.1 && t < 11.2) {
+      // Levi stands over the fallen Beast with Zeke torn free before the Cart Titan lunges in
+      L.x = lerp(L.x, 11.2, Math.min(1, dt * 4));
+      L.y = lerp(L.y, 2.8, Math.min(1, dt * 4));
+      L.z = Z - 2.2;
+      gas(1);
     }
-    if (t >= 6.8 && !m.extracted) {
+    if (t >= 8.6 && !m.extracted) {
       m.extracted = true;
-      this.G.caption = 'LEVI PULLS ZEKE FROM THE NAPE';
+      m.napeCut = true;
+      m.armCut = true;
+      this.G.pops.push({ text: 'Levi rips Zeke from the nape!', t: -1, x: this.view.W / 2, y: this.view.H * 0.34 });
     }
-    if (t > 5.5 && this.parts.length < 1400 && Math.random() < dt * 12) {
+    if (t > 5.8 && this.parts.length < 1400 && Math.random() < dt * 14) {
       this.parts.push({
-        x: rand(0, 18),
-        y: rand(1, 4),
+        x: rand(2, 16),
+        y: rand(1, 3.5),
         z: this.G.demonZ + rand(-3, 3),
-        vx: rand(-0.5, 0.5),
-        vy: rand(2, 5),
+        vx: rand(-0.6, 0.6),
+        vy: rand(2.2, 5.5),
         vz: 0,
         life: 0,
         max: rand(3, 6),
-        size: rand(4, 8),
+        size: rand(3.5, 7.5),
         col: [240, 238, 232],
         dust: 1,
       });
     }
-    if (t > 6.8 && t < 8.3) {
-      L.x = lerp(L.x, 2.5, Math.min(1, dt * 3));
-      L.y = lerp(L.y, 8, Math.min(1, dt * 3));
-      L.z = Z - 4;
-      gas();
-    }
-    if (t >= 8.3 && !m.rescued) {
+    if (t >= 11.2 && !m.rescued) {
       m.rescued = true;
-      this.G.caption = 'THE CART TITAN SNATCHES ZEKE AWAY';
       this.G.pops.push({ text: 'The Cart Titan escapes with Zeke!', t: 0, x: this.view.W / 2, y: this.view.H * 0.34 });
     }
-    if (t >= 8.3) {
-      L.x = lerp(L.x, 0, Math.min(1, dt * 2));
-      L.y = lerp(L.y, 4, Math.min(1, dt * 2));
-      L.z = Z - 6;
-      gas();
+    if (t >= 11.2) {
+      L.x = lerp(L.x, 4, Math.min(1, dt * 2.5));
+      L.y = lerp(L.y, 4.5, Math.min(1, dt * 2.5));
+      L.z = Z - 5;
+      gas(1);
     }
-    this.G.caption = t < 2 ? 'LEVI TEARS THROUGH THE THROWING ARM'
-      : t < 2.6 ? 'THE BEAST GUARDS HIS NAPE'
-        : t < 3.4 ? 'LEVI BLINDS THE BEAST'
-          : t < 6.25 ? 'THE BEAST FALLS'
-            : t < 6.8 ? 'THE NAPE IS OPEN'
-              : t < 8.3 ? 'LEVI PULLS ZEKE FROM THE NAPE'
-                : 'THE CART TITAN ESCAPES WITH ZEKE';
-    if (t > 10 && !this.G.zekeDone) {
+    this.G.caption = t < 2.0 ? 'BEAST REACHES TO CATCH — LEVI SHREDS HIS RIGHT ARM'
+      : t < 2.85 ? 'SENSING LEVI BEHIND — HE GUARDS HIS NAPE WITH HIS LEFT HAND'
+        : t < 3.4 ? 'LEVI TAKES OUT BOTH EYES'
+          : t < 4.25 ? 'BLINDED, HE STAGGERS — LEVI DIVES FOR THE ACHILLES HEELS'
+            : t < 6.25 ? 'THE BEAST CRASHES HEAD-DOWN TO THE EARTH'
+              : t < 7.45 ? 'LEVI SURGES UP AND DIVES ONTO THE NAPE'
+                : t < 9.1 ? 'HACK AND SLASH — TEARING ZEKE FROM THE NAPE'
+                  : t < 11.2 ? 'ZEKE IS TORN FREE — LEVI HOLDS HIM AT BLADEPOINT'
+                    : 'THE CART TITAN SNATCHES ZEKE AWAY';
+    if (t > 12.8 && !this.G.zekeDone) {
       this.G.zekeDone = true;
       this.G.zekeDoneT = 0;
     }
@@ -2132,6 +2377,7 @@ export class GameEngine {
   }
 
   private winGame(byLevi: boolean): void {
+    switchToCounterattack();
     this.G.state = 'win';
     this.G.winByLevi = byLevi;
     const alive = this.riders.filter(r => r.alive).length;
@@ -2172,23 +2418,57 @@ export class GameEngine {
         return;
       }
       const pulse = (Math.sin(this.G.t * (this.G.fate === 'serious' ? 5 : 3)) + 1) / 2;
+      if (this.G.fate === 'serious') {
+        // Clear blood-red tint instead of unreadable blur
+        ctx.fillStyle = `rgba(115,8,8,${0.14 + pulse * 0.1})`;
+        ctx.fillRect(0, 0, W, H);
+      }
       const rv = ctx.createRadialGradient(
         W / 2,
         H / 2,
-        H * (this.G.fate === 'serious' ? 0.15 : 0.35),
+        H * (this.G.fate === 'serious' ? 0.22 : 0.35),
         W / 2,
         H / 2,
-        H * 0.9
+        H * 0.92
       );
       rv.addColorStop(0, 'rgba(0,0,0,0)');
       rv.addColorStop(
         1,
         this.G.fate === 'serious'
-          ? `rgba(90,0,0,${0.75 + pulse * 0.2})`
+          ? `rgba(110,0,0,${0.62 + pulse * 0.18})`
           : `rgba(40,0,0,${0.35 + pulse * 0.1})`
       );
       ctx.fillStyle = rv;
       ctx.fillRect(0, 0, W, H);
+
+      // Heavy eyelids closing and fluttering open during serious injury (stays wide open once Levi engages Beast)
+      if (
+        this.G.fate === 'serious' &&
+        this.G.deathT > 1.2 &&
+        this.levi.phase !== 'final' &&
+        this.monkey.state !== 'cut'
+      ) {
+        const cyc = (this.G.deathT - 1.2) % 4.4;
+        let shut = 0;
+        if (cyc > 3.1 && cyc < 4.2) {
+          const b = (cyc - 3.1) / 1.1;
+          shut = Math.sin(b * Math.PI) * 0.44;
+        }
+        const lidH = H * (0.06 + shut);
+        const topG = ctx.createLinearGradient(0, 0, 0, lidH + 34 * u);
+        topG.addColorStop(0, 'rgba(8,2,2,0.96)');
+        topG.addColorStop(0.75, 'rgba(18,4,4,0.88)');
+        topG.addColorStop(1, 'rgba(18,4,4,0)');
+        ctx.fillStyle = topG;
+        ctx.fillRect(0, 0, W, lidH + 34 * u);
+
+        const botG = ctx.createLinearGradient(0, H, 0, H - lidH - 34 * u);
+        botG.addColorStop(0, 'rgba(8,2,2,0.96)');
+        botG.addColorStop(0.75, 'rgba(18,4,4,0.88)');
+        botG.addColorStop(1, 'rgba(18,4,4,0)');
+        ctx.fillStyle = botG;
+        ctx.fillRect(0, H - lidH - 34 * u, W, lidH + 34 * u);
+      }
       if (this.G.fate === 'serious' && this.G.zekeDone) {
         ctx.fillStyle = `rgba(0,0,0,${clamp(this.G.zekeDoneT / 2, 0, 1)})`;
         ctx.fillRect(0, 0, W, H);
@@ -2236,10 +2516,10 @@ export class GameEngine {
 
     ctx.textBaseline = 'middle';
 
-    // Top Distance Bar
+    // Top Distance Bar (sized cleanly so right-side tool buttons never overlap at narrow viewports)
     const dist = Math.max(0, this.G.demonZ - p.z - WIN_DIST);
-    const bw = W * 0.4;
-    const bx = (W - bw) / 2;
+    const bw = Math.min(W * 0.30, 380 * u);
+    const bx = W < 1050 ? Math.max(175, W * 0.36 - bw * 0.5) : (W - bw) / 2;
     const by = 26 * u;
     ctx.fillStyle = 'rgba(14,10,6,0.52)';
     ctx.fillRect(bx - 10 * u, by - 14 * u, bw + 20 * u, 46 * u);

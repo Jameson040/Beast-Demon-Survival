@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 500">
+  <defs>
+    <radialGradient id="furBase" cx="56%" cy="32%" r="68%">
+      <stop offset="0%" stop-color="#8a5a3a"/>
+      <stop offset="48%" stop-color="#5d3a24"/>
+      <stop offset="85%" stop-color="#3a2214"/>
+      <stop offset="100%" stop-color="#22130b"/>
+    </radialGradient>
+    <linearGradient id="rim" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#180d07" stop-opacity="0.58"/>
+      <stop offset="45%" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="82%" stop-color="#f6c788" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#ffe1ac" stop-opacity="0.45"/>
+    </linearGradient>
+    <linearGradient id="skinChest" x1="20%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" stop-color="#9e6d4b"/>
+      <stop offset="60%" stop-color="#754c32"/>
+      <stop offset="100%" stop-color="#4e301e"/>
+    </linearGradient>
+  </defs>
+  <!-- Broad rounded ape shoulders & shaggy barrel torso -->
+  <path d="M56 126 C52 54, 152 18, 280 18 C408 18, 508 54, 504 126 C512 204, 488 308, 444 396 C418 444, 366 476, 280 478 C194 476, 142 444, 116 396 C72 308, 48 204, 56 126 Z" fill="url(#furBase)" stroke="#1e1008" stroke-width="6"/>
+  <!-- Shaggy shoulder fur locks -->
+  <path d="M58 134 L34 176 L62 174 L46 218 L76 206 L64 252 L92 238" fill="#3a2214" stroke="#1e1008" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M502 134 L526 176 L498 174 L514 218 L484 206 L496 252 L468 238" fill="#6b442a" stroke="#1e1008" stroke-width="3" stroke-linejoin="round"/>
+  <!-- Heavy pectorals & sunken ribcage -->
+  <path d="M126 128 C166 102, 240 108, 274 146 C236 184, 158 188, 120 156 Z" fill="url(#skinChest)" opacity="0.72"/>
+  <path d="M434 128 C394 102, 320 108, 286 146 C324 184, 402 188, 440 156 Z" fill="url(#skinChest)" opacity="0.82"/>
+  <path d="M134 158 Q204 186 276 154 M426 158 Q356 186 284 154" fill="none" stroke="#24130a" stroke-width="5" stroke-linecap="round" opacity="0.75"/>
+  <!-- Pot-bellied Beast Titan torso contour & fur ridges -->
+  <ellipse cx="280" cy="328" rx="134" ry="118" fill="url(#skinChest)" opacity="0.34"/>
+  <path d="M278 156 L278 430" stroke="#24130a" stroke-width="4" opacity="0.55"/>
+  <path d="M174 234 Q224 248 268 238 M386 234 Q336 248 292 238" fill="none" stroke="#28150b" stroke-width="4" opacity="0.55" stroke-linecap="round"/>
+  <path d="M164 292 Q220 310 270 296 M396 292 Q340 310 290 296" fill="none" stroke="#28150b" stroke-width="4" opacity="0.5" stroke-linecap="round"/>
+  <!-- Shaggy chest/collarbone fur tufts -->
+  <g stroke="#2a170c" stroke-width="4" stroke-linecap="round" fill="none" opacity="0.72">
+    <path d="M120 74 L104 114 M156 58 L146 98 M204 46 L198 86 M356 46 L362 86 M404 58 L414 98 M440 74 L456 114"/>
+    <path d="M110 214 L92 258 M132 272 L116 318 M450 214 L468 258 M428 272 L444 318"/>
+    <path d="M204 426 L194 464 M242 436 L236 472 M318 436 L324 472 M356 426 L366 464"/>
+  </g>
+  <!-- Golden-hour right rim lighting -->
+  <path d="M56 126 C52 54, 152 18, 280 18 C408 18, 508 54, 504 126 C512 204, 488 308, 444 396 C418 444, 366 476, 280 478 C194 476, 142 444, 116 396 C72 308, 48 204, 56 126 Z" fill="url(#rim)"/>
+</svg>

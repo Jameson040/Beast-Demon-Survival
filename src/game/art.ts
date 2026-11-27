@@ -1,5 +1,18 @@
 import * as PIXI from 'pixi.js';
 import { clamp, lerp, HORSE_VIEWS, HPPM, TPPM, MPPM } from './types';
+import houseImgUrl from '../assets/images/shiganshina_house.png';
+import pineImgUrl from '../assets/images/pine_tree.png';
+import boulderImgUrl from '../assets/images/boulder_rock.png';
+import panoramaImgUrl from '../assets/images/mountains_panorama.jpg';
+import bushImgUrl from '../assets/images/bush_meadow.png';
+import titan1ImgUrl from '../assets/images/pure_titan_1.png';
+import titan2ImgUrl from '../assets/images/pure_titan_2.png';
+import beastTorsoSvg from '../assets/images/beast_torso.svg';
+import beastHeadSvg from '../assets/images/beast_head.svg';
+import beastLimbSvg from '../assets/images/beast_limb.svg';
+import beastHandSvg from '../assets/images/beast_hand.svg';
+import leviFlightSvg from '../assets/images/levi_flight.svg';
+import leviSpinSvg from '../assets/images/levi_spin.svg';
 
 export interface ArtMeta {
   ppm: number;
@@ -1941,67 +1954,276 @@ function artRiders(): void {
     reg('rider' + f, c, HPPM, 0.5, ((2.52 - 1.45) * HPPM) / 294);
   }
 
-  // Fallen horse
-  let c = cnv(420, 200);
+  // Fallen horse lying collapsed on its side (anatomical greyscale base tinted by coat color)
+  let c = cnv(440, 220);
   let g = c.getContext('2d')!;
   g.lineCap = 'round';
-  g.strokeStyle = '#555';
-  g.lineWidth = 14;
-  for (const [x, a] of [
-    [120, -0.6],
-    [170, -0.2],
-    [250, 0.3],
-    [300, 0.7],
-  ]) {
-    g.beginPath();
-    g.moveTo(x, 120);
-    g.lineTo(x + Math.sin(a) * 70, 120 - Math.cos(a) * 70);
-    g.stroke();
-  }
-  g.fillStyle = radial(g, 215, 118, 190, [
-    [0, '#e6e0d6'],
-    [0.65, '#b6aea2'],
-    [1, '#7a7268'],
-  ]);
-  ellipseP(g, 210, 140, 175, 58);
-  g.fill();
-  ellipseP(g, 370, 120, 45, 32);
-  g.fill();
-  // Fallen saddle patch
-  g.fillStyle = 'rgba(56,34,18,0.85)';
-  ellipseP(g, 215, 118, 48, 22);
-  g.fill();
-  reg('horseFall', c, HPPM, 0.5, 0.95);
+  g.lineJoin = 'round';
 
-  // Thrown Scout rider
-  c = cnv(320, 124);
+  // Grounded flowing tail splayed onto the grass (left rear)
+  g.strokeStyle = '#26201c';
+  g.lineWidth = 14;
+  g.beginPath();
+  g.moveTo(78, 140);
+  g.quadraticCurveTo(36, 154, 18, 182);
+  g.stroke();
+  g.lineWidth = 8;
+  g.beginPath();
+  g.moveTo(74, 146);
+  g.quadraticCurveTo(42, 168, 28, 192);
+  g.stroke();
+
+  // Far-side hind & fore legs sprawled forward/flat along the ground (NOT sticking up in the air)
+  const drawFallenLeg = (
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    w1: number,
+    w2: number,
+    col1: string,
+    col2: string
+  ) => {
+    g.strokeStyle = col1;
+    g.lineWidth = w1;
+    g.beginPath();
+    g.moveTo(x0, y0);
+    g.lineTo(x1, y1);
+    g.stroke();
+    g.strokeStyle = col2;
+    g.lineWidth = w2;
+    g.beginPath();
+    g.moveTo(x1, y1);
+    g.lineTo(x2, y2);
+    g.stroke();
+    // Dark hoof
+    g.fillStyle = '#1e1916';
+    ellipseP(g, x2, y2, w2 * 0.72, w2 * 0.48, Math.atan2(y2 - y1, x2 - x1));
+    g.fill();
+  };
+
+  // Back-side legs resting behind torso
+  drawFallenLeg(128, 152, 168, 180, 214, 192, 22, 13, '#726a60', '#5a524a');
+  drawFallenLeg(258, 154, 304, 182, 352, 190, 20, 12, '#726a60', '#5a524a');
+
+  // Sculpted collapsed torso & muscular haunches
+  g.fillStyle = radial(g, 206, 128, 175, [
+    [0, '#ece6dc'],
+    [0.52, '#c8bfb2'],
+    [0.85, '#8c8378'],
+    [1, '#5c554c'],
+  ]);
+  ellipseP(g, 198, 140, 126, 48, -0.04);
+  g.fill();
+  // Hindquarters muscle highlight
+  ellipseP(g, 118, 136, 54, 42, -0.15);
+  g.fill();
+  // Shoulder muscle
+  ellipseP(g, 268, 134, 48, 38, 0.22);
+  g.fill();
+
+  // Collapsed neck & head resting low on the turf
+  g.fillStyle = radial(g, 336, 146, 95, [
+    [0, '#dfd8ce'],
+    [0.65, '#a89f93'],
+    [1, '#686058'],
+  ]);
+  poly(g, [
+    [276, 112],
+    [352, 128],
+    [364, 164],
+    [286, 166],
+  ]);
+  g.fill();
+  // Dark mane along top crest of collapsed neck
+  g.fillStyle = '#241e1a';
+  poly(g, [
+    [262, 108],
+    [296, 106],
+    [332, 118],
+    [354, 126],
+    [340, 138],
+    [300, 126],
+    [266, 122],
+  ]);
+  g.fill();
+
+  // Sculpted horse head, muzzle, eye & flattened ear
+  g.fillStyle = radial(g, 376, 152, 58, [
+    [0, '#e4ddd3'],
+    [0.65, '#aba296'],
+    [1, '#665e56'],
+  ]);
+  poly(g, [
+    [344, 128],
+    [376, 128],
+    [414, 156],
+    [408, 174],
+    [364, 172],
+    [344, 158],
+  ]);
+  g.fill();
+  // Flattened ear
+  g.fillStyle = '#6c645b';
+  poly(g, [
+    [348, 130],
+    [334, 114],
+    [358, 122],
+  ]);
+  g.fill();
+  // Closed eye & nostril
+  g.strokeStyle = '#241b16';
+  g.lineWidth = 3;
+  g.beginPath();
+  g.moveTo(366, 142);
+  g.lineTo(376, 144);
+  g.stroke();
+  g.fillStyle = '#1e1612';
+  ellipseP(g, 404, 162, 5, 3.5, 0.3);
+  g.fill();
+
+  // Leather saddle & stirrup strap on fallen flank
+  g.fillStyle = '#4a2b16';
+  ellipseP(g, 206, 116, 44, 22, -0.05);
+  g.fill();
+  g.strokeStyle = '#2b180b';
+  g.lineWidth = 4;
+  g.beginPath();
+  g.moveTo(206, 122);
+  g.lineTo(200, 162);
+  g.stroke();
+
+  // Near-side collapsed legs folded/sprawled naturally on top
+  drawFallenLeg(124, 154, 86, 184, 52, 198, 24, 14, '#b8afa2', '#7e756a');
+  drawFallenLeg(258, 150, 294, 176, 256, 196, 22, 13, '#b8afa2', '#7e756a');
+
+  // Subtle dark crimson wound smear on flank
+  g.fillStyle = 'rgba(115, 10, 12, 0.72)';
+  ellipseP(g, 172, 138, 22, 10, 0.2);
+  g.fill();
+  ellipseP(g, 160, 144, 12, 6, -0.3);
+  g.fill();
+
+  reg('horseFall', c, HPPM, 0.5, 0.92);
+
+  // Thrown / fallen Survey Corps Scout (detailed sprawled limbs, cloak, ODM gear & blood)
+  c = cnv(340, 150);
   g = c.getContext('2d')!;
   g.lineCap = 'round';
-  g.strokeStyle = '#dcd4c4';
-  g.lineWidth = 22;
-  g.beginPath();
-  g.moveTo(68, 70);
-  g.lineTo(152, 62);
-  g.moveTo(64, 52);
-  g.lineTo(144, 42);
-  g.stroke();
-  g.strokeStyle = '#261a12';
+  g.lineJoin = 'round';
+
+  // Draped emerald Survey Corps cloak spread out behind torso
+  g.fillStyle = '#23562f';
+  poly(g, [
+    [136, 70],
+    [224, 48],
+    [244, 82],
+    [214, 106],
+    [142, 98],
+  ]);
+  g.fill();
+  g.fillStyle = '#317341';
+  poly(g, [
+    [144, 72],
+    [220, 56],
+    [232, 82],
+    [154, 90],
+  ]);
+  g.fill();
+
+  // Sprawled Survey Corps riding breeches (two staggered legs)
+  g.strokeStyle = '#d4ccb8';
   g.lineWidth = 20;
   g.beginPath();
-  g.moveTo(50, 72);
-  g.lineTo(90, 68);
-  g.moveTo(46, 54);
-  g.lineTo(86, 48);
+  g.moveTo(154, 82);
+  g.lineTo(106, 94);
+  g.lineTo(76, 104);
+  g.moveTo(154, 72);
+  g.lineTo(104, 66);
+  g.lineTo(66, 74);
   g.stroke();
-  g.fillStyle = '#2f6f3e';
-  ellipseP(g, 192, 60, 72, 35);
+
+  // Knee-high dark leather boots
+  g.strokeStyle = '#241810';
+  g.lineWidth = 18;
+  g.beginPath();
+  g.moveTo(82, 102);
+  g.lineTo(44, 114);
+  g.moveTo(72, 73);
+  g.lineTo(36, 80);
+  g.stroke();
+  // Boot soles
+  g.fillStyle = '#18100a';
+  ellipseP(g, 40, 114, 9, 5, 0.4);
   g.fill();
-  g.fillStyle = '#8e5e36';
-  g.fillRect(172, 30, 58, 18);
-  g.fillStyle = '#2a1a10';
-  ellipseP(g, 268, 58, 22, 20);
+  ellipseP(g, 33, 80, 9, 5, 0.2);
   g.fill();
-  reg('riderFall', c, HPPM, 0.5, 0.7);
+
+  // Leather ODM thigh straps
+  g.strokeStyle = '#4e311c';
+  g.lineWidth = 3.5;
+  g.beginPath();
+  g.moveTo(122, 78);
+  g.lineTo(120, 96);
+  g.moveTo(122, 60);
+  g.lineTo(120, 76);
+  g.stroke();
+
+  // Tan cropped Survey Corps jacket torso
+  g.fillStyle = '#8b5c34';
+  poly(g, [
+    [148, 62],
+    [224, 58],
+    [228, 92],
+    [150, 94],
+  ]);
+  g.fill();
+
+  // Steel ODM hip scabbard box
+  g.fillStyle = '#8e959d';
+  g.fillRect(148, 84, 34, 16);
+  g.strokeStyle = '#363b42';
+  g.lineWidth = 2;
+  g.strokeRect(148, 84, 34, 16);
+
+  // Outstretched & limp arms
+  g.strokeStyle = '#7e522d';
+  g.lineWidth = 15;
+  g.beginPath();
+  g.moveTo(212, 64);
+  g.lineTo(246, 36);
+  g.lineTo(274, 28);
+  g.moveTo(208, 86);
+  g.lineTo(234, 110);
+  g.lineTo(256, 118);
+  g.stroke();
+  // Hands
+  g.fillStyle = '#d6a884';
+  ellipseP(g, 276, 28, 7, 5, -0.2);
+  g.fill();
+  ellipseP(g, 258, 118, 7, 5, 0.4);
+  g.fill();
+
+  // Crimson blood stain across torso & cloak
+  g.fillStyle = 'rgba(128, 10, 12, 0.86)';
+  ellipseP(g, 192, 78, 22, 13, 0.2);
+  g.fill();
+  ellipseP(g, 174, 86, 13, 8, -0.3);
+  g.fill();
+
+  // Head turned sideways with face & hair
+  g.fillStyle = '#d6a884';
+  ellipseP(g, 250, 74, 18, 16, 0.1);
+  g.fill();
+  g.fillStyle = '#2b1b12';
+  ellipseP(g, 246, 68, 18, 13, -0.25);
+  g.fill();
+  ellipseP(g, 258, 70, 10, 11, 0.2);
+  g.fill();
+
+  reg('riderFall', c, HPPM, 0.5, 0.72);
 
   // Captain Levi (ODM spinning blur silhouette with twin gleaming steel blades!)
   c = cnv(180, 180);
@@ -2810,6 +3032,40 @@ function artScars(): void {
     g.fill();
   }
   reg('skid', c, 64, 0.5, 0.5);
+
+  // 3 organic flat ground-soaked crimson blood pool decals
+  for (let v = 0; v < 3; v++) {
+    const bc = cnv(128, 128);
+    const bg = bc.getContext('2d')!;
+    const br = rng(2200 + v * 31);
+    bg.fillStyle = radial(bg, 64, 64, 48, [
+      [0, 'rgba(82,6,8,0.88)'],
+      [0.45, 'rgba(118,10,12,0.74)'],
+      [0.78, 'rgba(136,14,16,0.34)'],
+      [1, 'rgba(136,14,16,0)'],
+    ]);
+    bg.fillRect(0, 0, 128, 128);
+    // Wide flat pools & splatters matching horizontal ground perspective
+    for (let i = 0; i < 8; i++) {
+      const a = br() * Math.PI * 2;
+      const dx = Math.cos(a) * (10 + br() * 26);
+      const dy = Math.sin(a) * (6 + br() * 14);
+      const rx = 14 + br() * 18;
+      const ry = 6 + br() * 9;
+      bg.fillStyle = i % 2 === 0 ? 'rgba(92,8,10,0.78)' : 'rgba(128,12,14,0.58)';
+      ellipseP(bg, 64 + dx, 64 + dy, rx, ry, (br() - 0.5) * 0.25);
+      bg.fill();
+    }
+    for (let i = 0; i < 12; i++) {
+      const a = br() * Math.PI * 2;
+      const dx = Math.cos(a) * (20 + br() * 34);
+      const dy = Math.sin(a) * (10 + br() * 18);
+      bg.fillStyle = `rgba(${(98 + br() * 42) | 0},10,12,${0.48 + br() * 0.32})`;
+      ellipseP(bg, 64 + dx, 64 + dy, 2.5 + br() * 4.5, 1.4 + br() * 2.2, 0);
+      bg.fill();
+    }
+    reg('blood' + v, bc, 64, 0.5, 0.5);
+  }
 }
 
 /* ---------- 10. SMOKE PUFFS: irregular billows, not round orbs ---------- */
@@ -2883,6 +3139,159 @@ function artSmoke(): void {
   }
 }
 
+let customLoaded = false;
+function loadCustomAssets(): void {
+  if (customLoaded) return;
+  customLoaded = true;
+
+  const loadImg = (url: string, cb: (img: HTMLImageElement) => void) => {
+    const img = new Image();
+    img.decoding = 'async';
+    img.onload = () => cb(img);
+    img.src = url;
+  };
+
+  const toCanvasTex = (img: HTMLImageElement, w = img.width, h = img.height) => {
+    const c = cnv(w, h);
+    const g = c.getContext('2d')!;
+    g.drawImage(img, 0, 0, w, h);
+    return mkTex(c);
+  };
+
+  // High-detail Beast Titan & Captain Levi SVGs mapped onto exact articulated part metrics
+  loadImg(beastTorsoSvg, img => {
+    const tex = toCanvasTex(img, Math.round(10.4 * MPPM), Math.round(12.2 * MPPM));
+    ART.tex.mTorso = tex;
+    ART.meta.mTorso = { ...ART.meta.mTorso, wPx: tex.width, hPx: tex.height };
+  });
+  loadImg(beastHeadSvg, img => {
+    const tex = toCanvasTex(img, Math.round(6.0 * MPPM), Math.round(5.4 * MPPM));
+    ART.tex.mHead = tex;
+    ART.meta.mHead = { ...ART.meta.mHead, wPx: tex.width, hPx: tex.height };
+  });
+  loadImg(beastHandSvg, img => {
+    const tex = toCanvasTex(img, Math.round(2.65 * MPPM), Math.round(2.65 * MPPM));
+    ART.tex.mHand = tex;
+    ART.meta.mHand = { ...ART.meta.mHand, wPx: tex.width, hPx: tex.height };
+  });
+  loadImg(beastLimbSvg, img => {
+    const limbSpecs: [string, number, number][] = [
+      ['mUpper', 2.15, 6.6],
+      ['mFore', 1.8, 6.6],
+      ['mThigh', 2.75, 3.9],
+      ['mShin', 2.55, 3.9],
+    ];
+    for (const [name, wd, len] of limbSpecs) {
+      const tot = len + wd;
+      const tex = toCanvasTex(img, Math.round((wd + 0.35) * MPPM), Math.round(tot * MPPM));
+      ART.tex[name] = tex;
+      ART.meta[name] = {
+        ...ART.meta[name],
+        wPx: tex.width,
+        hPx: tex.height,
+        ay: (wd * 0.5) / tot,
+      };
+    }
+  });
+  loadImg(leviFlightSvg, img => {
+    const tex = toCanvasTex(img, 200, 200);
+    ART.tex.levi = tex;
+    ART.meta.levi = { ppm: 84, ax: 0.5, ay: 0.5, wPx: 200, hPx: 200 };
+  });
+  loadImg(leviSpinSvg, img => {
+    const tex = toCanvasTex(img, 240, 240);
+    ART.tex.leviSpin = tex;
+    ART.meta.leviSpin = { ppm: 84, ax: 0.5, ay: 0.5, wPx: 240, hPx: 240 };
+  });
+
+  loadImg(panoramaImgUrl, img => {
+    ART.tex.panorama = toCanvasTex(img);
+    ART.meta.panorama = { ppm: 1, ax: 0, ay: 1, wPx: img.width, hPx: img.height };
+  });
+
+  loadImg(houseImgUrl, img => {
+    const tex = toCanvasTex(img);
+    for (let v = 0; v < 2; v++) {
+      ART.tex['shiganshinaHouse' + v] = tex;
+      ART.meta['shiganshinaHouse' + v] = {
+        ppm: 42,
+        ax: 0.5,
+        ay: 0.99,
+        wPx: img.width,
+        hPx: img.height,
+      };
+    }
+  });
+
+  loadImg(pineImgUrl, img => {
+    const tex = toCanvasTex(img);
+    for (let v = 0; v < 2; v++) {
+      ART.tex['treePine' + v] = tex;
+      ART.meta['treePine' + v] = {
+        ppm: 32,
+        ax: 0.5,
+        ay: 0.99,
+        wPx: img.width,
+        hPx: img.height,
+      };
+    }
+  });
+
+  loadImg(boulderImgUrl, img => {
+    const bigTex = toCanvasTex(img);
+    for (let v = 0; v < 4; v++) {
+      ART.tex['bigRock' + v] = bigTex;
+      ART.meta['bigRock' + v] = {
+        ppm: 82,
+        ax: 0.5,
+        ay: 0.92,
+        wPx: img.width,
+        hPx: img.height,
+      };
+    }
+    // Lower/wider variant for jumpable field boulders matching their ~0.82m hitbox
+    const lc = cnv(200, 96);
+    const lg = lc.getContext('2d')!;
+    lg.drawImage(img, 0, 0, 200, 96);
+    for (let v = 0; v < 4; v++) reg('lowRock' + v, lc, 88, 0.5, 0.92);
+  });
+
+  loadImg(bushImgUrl, img => {
+    const tex = toCanvasTex(img);
+    for (let v = 0; v < 3; v++) {
+      ART.tex['bush' + v] = tex;
+      ART.meta['bush' + v] = {
+        ppm: 66,
+        ax: 0.5,
+        ay: 0.96,
+        wPx: img.width,
+        hPx: img.height,
+      };
+    }
+  });
+
+  const bindTitan = (url: string, indices: number[]) => {
+    loadImg(url, img => {
+      const tex = toCanvasTex(img);
+      for (const v of indices) {
+        ART.tex['titan' + v] = tex;
+        ART.tex['titanBack' + v] = tex;
+        ART.meta['titan' + v] = {
+          ...ART.meta['titan' + v],
+          ppm: TPPM,
+          ax: 0.5,
+          ay: 0.98,
+          wPx: img.width,
+          hPx: img.height,
+        };
+        ART.meta['titanBack' + v] = { ...ART.meta['titan' + v] };
+      }
+    });
+  };
+  bindTitan(titan1ImgUrl, [0, 2, 4, 6]);
+  bindTitan(titan2ImgUrl, [1, 3, 5, 7]);
+}
+
 let artBuilt = false;
 export function buildArt(): void {
   if (artBuilt) return;
@@ -2898,4 +3307,5 @@ export function buildArt(): void {
   artShards();
   artScars();
   artSmoke();
+  loadCustomAssets();
 }
