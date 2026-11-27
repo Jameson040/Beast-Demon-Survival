@@ -102,7 +102,9 @@ npm run build
 
 ---
 
-## License & Credits
+## Contributors & Credits
 
+- **Creator & Lead Developer**: [@Jameson040](https://github.com/Jameson040)
+- **AI Pair Programmer**: Google Antigravity
 - **Fan Project Notice**: Unofficial non-commercial *Attack on Titan* fan tribute. All original *Attack on Titan* IP, characters, and settings belong to Hajime Isayama / Kodansha.
 - **Rigged Horse Model**: Quaternius (CC0 1.0 Public Domain). See [docs/LICENSE-horse.md](docs/LICENSE-horse.md) for details.
