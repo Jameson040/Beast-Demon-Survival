@@ -163,7 +163,8 @@ export class GameEngine {
   riderStyle: EntityStyle = 'rigged';
 
   keys: Record<string, boolean> = {};
-  touch = { l: false, r: false, up: false };
+  touch = { l: false, r: false, up: false, down: false, steerX: 0 };
+  mobileUI = false;
 
   private nextRockId = 1;
   private onStateChange?: (snap: GameSnapshot) => void;
@@ -1322,9 +1323,14 @@ export class GameEngine {
     p.stumble = Math.max(0, p.stumble - dt * 1.4);
 
     if (p.alive) {
-      const steer =
-        (this.keys.d || this.keys.arrowright || this.touch.r ? 1 : 0) -
-        (this.keys.a || this.keys.arrowleft || this.touch.l ? 1 : 0);
+      const kbSteer =
+        (this.keys.d || this.keys.arrowright ? 1 : 0) -
+        (this.keys.a || this.keys.arrowleft ? 1 : 0);
+      const touchSteer =
+        Math.abs(this.touch.steerX) > 0.01
+          ? clamp(this.touch.steerX, -1, 1)
+          : (this.touch.r ? 1 : 0) - (this.touch.l ? 1 : 0);
+      const steer = clamp(kbSteer + touchSteer, -1, 1);
       const air = p.y > 0.01;
       const tvx = steer * 7.8;
       p.vx += (tvx - p.vx) * Math.min(1, dt * (air ? 1.3 : 4.4));
@@ -1332,7 +1338,7 @@ export class GameEngine {
       p.jumpCD = (p.jumpCD || 0) - dt;
 
       if (this.G.wantDash && p.dashCD <= 0 && (p.stam ?? 0) >= 0.22 && !air) {
-        const dir = steer || (p.vx >= 0 ? 1 : -1);
+        const dir = steer ? Math.sign(steer) : p.vx >= 0 ? 1 : -1;
         p.vx = dir * 15.5;
         p.stam = (p.stam ?? 0) - 0.22;
         p.dashCD = 0.7;
@@ -1349,7 +1355,7 @@ export class GameEngine {
       this.G.wantJump = false;
 
       const sprint = (this.keys.w || this.keys.arrowup || this.touch.up) && (p.stam ?? 0) > 0.02;
-      const rein = !!(this.keys.s || this.keys.arrowdown);
+      const rein = !!(this.keys.s || this.keys.arrowdown || this.touch.down);
       const ts = sprint ? 21 : rein ? 9 : 15;
       p.speed += (ts - p.speed) * Math.min(1, dt * 1.35);
       if (sprint) p.stam = (p.stam ?? 0) - dt * 0.2;
@@ -2387,9 +2393,10 @@ export class GameEngine {
 
   /* ---------------- HUD RENDERER (2D OVERLAY CANVAS) ---------------- */
   drawHUD(ctx: CanvasRenderingContext2D): void {
-    const { W, H, U } = this.view;
+    const { W, H, DPR } = this.view;
     const p = this.player;
-    const u = U;
+    const portrait = W < H * 1.1;
+    const u = Math.min(H / 900, Math.max(0.55, W / 960));
 
     // Cinematic vignette
     const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.4, W / 2, H / 2, H * 0.95);
@@ -2518,9 +2525,13 @@ export class GameEngine {
 
     // Top Distance Bar (sized cleanly so right-side tool buttons never overlap at narrow viewports)
     const dist = Math.max(0, this.G.demonZ - p.z - WIN_DIST);
-    const bw = Math.min(W * 0.30, 380 * u);
-    const bx = W < 1050 ? Math.max(175, W * 0.36 - bw * 0.5) : (W - bw) / 2;
-    const by = 26 * u;
+    const bw = portrait ? Math.min(W * 0.72, 340 * u) : Math.min(W * 0.24, 340 * u);
+    const bx = portrait
+      ? (W - bw) / 2
+      : W < 1100 * DPR
+        ? Math.max(222 * u, Math.min((W - bw) * 0.5, W - 405 * DPR - bw))
+        : (W - bw) / 2;
+    const by = portrait ? 68 * u : 26 * u;
     ctx.fillStyle = 'rgba(14,10,6,0.52)';
     ctx.fillRect(bx - 10 * u, by - 14 * u, bw + 20 * u, 46 * u);
     ctx.strokeStyle = 'rgba(138,96,56,0.45)';
@@ -2541,7 +2552,7 @@ export class GameEngine {
     ctx.font = `${15 * u}px Georgia`;
     ctx.textAlign = 'center';
     ctx.fillStyle = '#f2eadc';
-    ctx.fillText(`THE BEAST   ${Math.round(dist).toLocaleString()} m`, W / 2, by + 20 * u);
+    ctx.fillText(`THE BEAST   ${Math.round(dist).toLocaleString()} m`, bx + bw * 0.5, by + 20 * u);
 
     if (this.G.caption) {
       ctx.font = `italic ${13.5 * u}px Georgia`;
@@ -2552,6 +2563,7 @@ export class GameEngine {
 
     // Top-left Telemetry Panel
     const alive = this.riders.reduce((a, r) => a + (r.alive ? 1 : 0), 0);
+    const tlTop = portrait ? by + 44 * u : 10 * u;
     ctx.textAlign = 'left';
     ctx.font = `${14.5 * u}px Georgia`;
     const tl = [
@@ -2562,27 +2574,30 @@ export class GameEngine {
       `SCORE   ${Math.round(this.G.score)}`,
     ];
     ctx.fillStyle = 'rgba(14,10,6,0.48)';
-    ctx.fillRect(10 * u, 10 * u, 200 * u, 114 * u);
+    ctx.fillRect(10 * u, tlTop, 200 * u, 114 * u);
     ctx.strokeStyle = 'rgba(138,96,56,0.38)';
-    ctx.strokeRect(10 * u, 10 * u, 200 * u, 114 * u);
+    ctx.strokeRect(10 * u, tlTop, 200 * u, 114 * u);
     ctx.fillStyle = '#eee6d8';
-    tl.forEach((s, i) => ctx.fillText(s, 20 * u, (27 + i * 20) * u));
+    tl.forEach((s, i) => ctx.fillText(s, 20 * u, tlTop + (17 + i * 20) * u));
 
-    // Bottom-left Speed & Stamina Panel
+    // Speed & Stamina Panel (sits below Telemetry when touch wheel is active so bottom-left stays clear)
+    const stamW = this.mobileUI ? 200 * u : 224 * u;
+    const stamX = 10 * u;
+    const stamY = this.mobileUI ? tlTop + 122 * u : H - 64 * u;
     ctx.fillStyle = 'rgba(14,10,6,0.48)';
-    ctx.fillRect(10 * u, H - 64 * u, 224 * u, 54 * u);
+    ctx.fillRect(stamX, stamY, stamW, 54 * u);
     ctx.strokeStyle = 'rgba(138,96,56,0.38)';
-    ctx.strokeRect(10 * u, H - 64 * u, 224 * u, 54 * u);
+    ctx.strokeRect(stamX, stamY, stamW, 54 * u);
     ctx.fillStyle = '#eee6d8';
     ctx.font = `${15 * u}px Georgia`;
-    ctx.fillText(`${Math.round(p.speed * 3.6)} km/h`, 20 * u, H - 47 * u);
+    ctx.fillText(`${Math.round(p.speed * 3.6)} km/h`, stamX + 10 * u, stamY + 17 * u);
     ctx.fillStyle = '#2c251d';
-    ctx.fillRect(20 * u, H - 30 * u, 204 * u, 10 * u);
+    ctx.fillRect(stamX + 10 * u, stamY + 34 * u, stamW - 20 * u, 10 * u);
     ctx.fillStyle = (p.stam ?? 0) > 0.25 ? '#cea64c' : '#cc443c';
-    ctx.fillRect(20 * u, H - 30 * u, 204 * u * (p.stam ?? 0), 10 * u);
+    ctx.fillRect(stamX + 10 * u, stamY + 34 * u, (stamW - 20 * u) * (p.stam ?? 0), 10 * u);
     ctx.font = `${11 * u}px Georgia`;
     ctx.fillStyle = '#cfc5b4';
-    ctx.fillText('STAMINA', 124 * u, H - 47 * u);
+    ctx.fillText('STAMINA', stamX + stamW - 76 * u, stamY + 17 * u);
 
     // Incoming Volley Warning
     if (this.G.warn.length && p.alive) {
@@ -2625,9 +2640,9 @@ export class GameEngine {
 
     // Upgraded Scout's Eye Radar (Shrapnel Ticks + Approaching Field Rocks!)
     if (this.G.radar && p.alive) {
-      const rw = Math.min(W * 0.5, 520 * u);
+      const rw = portrait ? Math.min(W * 0.86, 420 * u) : this.mobileUI ? Math.min(W * 0.34, 420 * u) : Math.min(W * 0.5, 520 * u);
       const rx = (W - rw) / 2;
-      const ry = H - 30 * u;
+      const ry = this.mobileUI && portrait ? H - Math.max(240 * u, 168 * DPR) : H - 30 * u;
       const RANGE = 12;
       const HOR_T = 1.4;
       ctx.fillStyle = 'rgba(14,10,6,0.52)';
@@ -2728,7 +2743,11 @@ export class GameEngine {
       ctx.fillText('PAUSED', W / 2, H / 2 - 10 * u);
       ctx.font = `${15 * u}px Georgia`;
       ctx.fillStyle = '#ccc2b2';
-      ctx.fillText('Press P or ESC to resume the charge', W / 2, H / 2 + 28 * u);
+      ctx.fillText(
+        this.mobileUI ? 'Tap RESUME or press P / ESC to continue' : 'Press P or ESC to resume the charge',
+        W / 2,
+        H / 2 + 28 * u
+      );
     }
   }
 }

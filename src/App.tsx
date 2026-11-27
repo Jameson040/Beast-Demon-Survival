@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { audioInit, AudioMix, MIX, setAudioMix } from './game/audio';
 import { GameEngine } from './game/engine';
+import MobileControls from './game/MobileControls';
 import { WorldRenderer } from './game/renderer';
 import FieldPlan from './game/FieldPlan';
 import {
@@ -13,6 +14,15 @@ import {
   WIN_DIST,
 } from './game/types';
 
+function isLikelyTouchViewport(): boolean {
+  if (typeof window === 'undefined') return false;
+  return (
+    window.matchMedia?.('(pointer: coarse)').matches ||
+    (navigator.maxTouchPoints ?? 0) > 0 ||
+    window.innerWidth <= 900
+  );
+}
+
 export default function App() {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const hudRef = useRef<HTMLCanvasElement | null>(null);
@@ -22,6 +32,8 @@ export default function App() {
   const [planOpen, setPlanOpen] = useState(false);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState('');
+  const [touchMode, setTouchMode] = useState<boolean>(() => isLikelyTouchViewport());
+  const touchOverrideRef = useRef<boolean | null>(null);
   const [snap, setSnap] = useState<GameSnapshot>({
     state: 'menu',
     diffKey: 'normal',
@@ -59,8 +71,14 @@ export default function App() {
       hud.height = h;
       eng.setView(w, h, dpr);
       renderer.resize(w, h);
+      if (touchOverrideRef.current === null) {
+        const mobile = isLikelyTouchViewport();
+        setTouchMode(mobile);
+        eng.mobileUI = mobile;
+      }
     };
     applyResize();
+    eng.mobileUI = isLikelyTouchViewport();
 
     let cancelled = false;
     let rafId = 0;
@@ -129,39 +147,20 @@ export default function App() {
       eng.keys[e.key.toLowerCase()] = false;
     };
 
-    const touchUpdate = (e: TouchEvent) => {
-      eng.touch.l = false;
-      eng.touch.r = false;
-      eng.touch.up = false;
-      for (let i = 0; i < e.touches.length; i++) {
-        const t = e.touches[i];
-        const x = t.clientX / window.innerWidth;
-        const y = t.clientY / window.innerHeight;
-        if (y < 0.4) eng.touch.up = true;
-        else if (x < 0.5) eng.touch.l = true;
-        else eng.touch.r = true;
-      }
-    };
-
-    const onTouchStart = (e: TouchEvent) => {
+    const onTouchWake = () => {
       audioInit();
-      touchUpdate(e);
-      if (e.touches.length >= 2 && eng.G.state === 'play') {
-        eng.G.wantJump = true;
+      if (touchOverrideRef.current === null) {
+        setTouchMode(true);
+        eng.mobileUI = true;
       }
-      e.preventDefault();
     };
-    const onTouchMove = (e: TouchEvent) => {
-      touchUpdate(e);
-      e.preventDefault();
-    };
-    const onTouchEnd = (e: TouchEvent) => {
-      touchUpdate(e);
-      e.preventDefault();
+    const onPointerWake = () => {
+      audioInit();
     };
     const onBlur = () => {
       for (const k in eng.keys) eng.keys[k] = false;
-      eng.touch.l = eng.touch.r = eng.touch.up = false;
+      eng.touch.l = eng.touch.r = eng.touch.up = eng.touch.down = false;
+      eng.touch.steerX = 0;
       if (eng.G.state === 'play') eng.togglePause();
     };
 
@@ -169,10 +168,8 @@ export default function App() {
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('blur', onBlur);
-    hud.addEventListener('touchstart', onTouchStart, { passive: false });
-    hud.addEventListener('touchmove', onTouchMove, { passive: false });
-    hud.addEventListener('touchend', onTouchEnd, { passive: false });
-    hud.addEventListener('touchcancel', onTouchEnd, { passive: false });
+    window.addEventListener('touchstart', onTouchWake, { passive: true });
+    hud.addEventListener('pointerdown', onPointerWake);
 
     let last = performance.now();
     const frame = (now: number) => {
@@ -211,10 +208,8 @@ export default function App() {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
-      hud.removeEventListener('touchstart', onTouchStart);
-      hud.removeEventListener('touchmove', onTouchMove);
-      hud.removeEventListener('touchend', onTouchEnd);
-      hud.removeEventListener('touchcancel', onTouchEnd);
+      window.removeEventListener('touchstart', onTouchWake);
+      hud.removeEventListener('pointerdown', onPointerWake);
       renderer.destroy();
       engineRef.current = null;
     };
@@ -284,6 +279,17 @@ export default function App() {
       {!planOpen && (snap.state === 'play' || snap.state === 'pause') && (
         <nav className="game-tools" aria-label="Game controls">
           <button onClick={() => setAudioOpen(v => !v)}>{audioOpen ? 'MIXER ×' : 'MIXER'}</button>
+          <button onClick={() => engineRef.current?.toggleRadar()}>RADAR <span>H</span></button>
+          <button
+            onClick={() => {
+              const next = !touchMode;
+              touchOverrideRef.current = next;
+              setTouchMode(next);
+              if (engineRef.current) engineRef.current.mobileUI = next;
+            }}
+          >
+            {touchMode ? 'PAD ON' : 'PAD'}
+          </button>
           <button onClick={() => togglePlanRef.current()}>FIELD PLAN <span>TAB</span></button>
           <button onClick={() => engineRef.current?.togglePause()}>{snap.state === 'pause' ? 'RESUME' : 'PAUSE'} <span>P</span></button>
           {snap.state === 'play' && snap.fate && (
@@ -291,6 +297,20 @@ export default function App() {
           )}
           <button onClick={() => engineRef.current?.goToMenu()}>MENU</button>
         </nav>
+      )}
+
+      {touchMode && !planOpen && snap.state === 'play' && !snap.fate && engineRef.current && (
+        <MobileControls engine={engineRef.current} onUnlockAudio={audioInit} />
+      )}
+
+      {touchMode && !planOpen && snap.state === 'play' && snap.fate && (
+        <button
+          type="button"
+          className="bds-mobile-skip"
+          onClick={() => engineRef.current?.skipToResults()}
+        >
+          SKIP TO RESULTS &rsaquo;
+        </button>
       )}
 
       {audioOpen && !planOpen && (snap.state === 'play' || snap.state === 'pause') && (
@@ -361,7 +381,7 @@ export default function App() {
             <div className="bds-sub">
               1,500 metres of open field. One hundred and twenty riders. One Beast.
             </div>
-            <p>
+            <p className="bds-lore">
               Ride from the city gate, through the ruined district, straight toward
               the 20 m Beast. His Titans wrap around the far end of the plain, leaving a central opening.
               His quadruped carrier hauls boulders; he crushes each into a fistful
@@ -396,7 +416,7 @@ export default function App() {
                 </tr>
               </tbody>
             </table>
-            <p style={{ fontSize: 13, color: '#b2a692' }}>
+            <p className="bds-lore" style={{ fontSize: 13, color: '#b2a692' }}>
               Watch shadows racing across the grass and Scout&apos;s Eye: red ticks mark incoming
               shrapnel, stone silhouettes mark approaching field boulders. Large boulders can even
               shatter low-flying fragments.
@@ -420,7 +440,7 @@ export default function App() {
             </div>
             {loadError && <p role="alert">Unable to prepare the WebGL scene: {loadError}</p>}
             <div className="bds-hint">
-              Touch: hold left or right half to steer, top of screen to sprint, two fingers to jump.
+              Mobile: drag left wheel to steer / spur / rein in; tap DASH (Shift) &amp; JUMP (Space) on the right.
             </div>
           </div>
         </div>

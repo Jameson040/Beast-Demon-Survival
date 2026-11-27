@@ -41,7 +41,7 @@ Relive the desperate Scout Regiment cavalry charge outside Shiganshina District 
 | <kbd>P</kbd> / <kbd>Esc</kbd> | Pause / resume |
 | <kbd>Enter</kbd> | Start run (or skip to results while downed) |
 
-Touch controls (left/right steer and upper-screen jump) are also supported on mobile viewports.
+Mobile touch layout is also supported out of the box (PUBG-style left virtual wheel for steering, spur, and rein in, plus right-side **DASH** & **JUMP** thumb buttons, and a **PAD** toggle in the top bar).
 
 ---
 
